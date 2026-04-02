@@ -1,41 +1,30 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import {
-    CodeProvider,
-    createCodeProviderClient,
-    getStaticCodeProvider,
-} from '@onlook/code-provider';
-import { getSandboxPreviewUrl, SandboxTemplates, Templates } from '@onlook/constants';
+import { CodeProvider } from '@onlook/code-provider';
+import { Templates } from '@onlook/constants';
 import { shortenUuid } from '@onlook/utility/src/id';
 
+import {
+    createConfiguredSandboxProviderClient,
+    getConfiguredSandboxPreviewUrl,
+    getConfiguredSandboxProvider,
+    getConfiguredSandboxStaticProvider,
+    getConfiguredSandboxTemplate,
+} from '@/server/sandbox/provider';
 import { createTRPCRouter, protectedProcedure } from '../../trpc';
 
 function getProvider({
     sandboxId,
-    userId,
-    provider = CodeProvider.CodeSandbox,
+    userId
 }: {
     sandboxId: string;
-    provider?: CodeProvider;
     userId?: undefined | string;
 }) {
-    if (provider === CodeProvider.CodeSandbox) {
-        return createCodeProviderClient(CodeProvider.CodeSandbox, {
-            providerOptions: {
-                codesandbox: {
-                    sandboxId,
-                    userId,
-                },
-            },
-        });
-    } else {
-        return createCodeProviderClient(CodeProvider.NodeFs, {
-            providerOptions: {
-                nodefs: {},
-            },
-        });
-    }
+    return createConfiguredSandboxProviderClient({
+        sandboxId,
+        userId,
+    });
 }
 
 export const sandboxRouter = createTRPCRouter({
@@ -47,12 +36,11 @@ export const sandboxRouter = createTRPCRouter({
         )
         .mutation(async ({ input, ctx }) => {
             // Create a new sandbox using the static provider
-            const CodesandboxProvider = await getStaticCodeProvider(CodeProvider.CodeSandbox);
+            const SandboxProvider = await getConfiguredSandboxStaticProvider();
 
-            // Use the empty Next.js template
-            const template = SandboxTemplates[Templates.EMPTY_NEXTJS];
+            const template = getConfiguredSandboxTemplate(Templates.EMPTY_NEXTJS);
 
-            const newSandbox = await CodesandboxProvider.createProject({
+            const newSandbox = await SandboxProvider.createProject({
                 source: 'template',
                 id: template.id,
                 title: input.title || 'Onlook Test Sandbox',
@@ -62,7 +50,7 @@ export const sandboxRouter = createTRPCRouter({
 
             return {
                 sandboxId: newSandbox.id,
-                previewUrl: getSandboxPreviewUrl(newSandbox.id, template.port),
+                previewUrl: getConfiguredSandboxPreviewUrl(newSandbox.id, template.port),
             };
         }),
 
@@ -130,10 +118,8 @@ export const sandboxRouter = createTRPCRouter({
 
             for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
                 try {
-                    const CodesandboxProvider = await getStaticCodeProvider(
-                        CodeProvider.CodeSandbox,
-                    );
-                    const sandbox = await CodesandboxProvider.createProject({
+                    const SandboxProvider = await getConfiguredSandboxStaticProvider();
+                    const sandbox = await SandboxProvider.createProject({
                         source: 'template',
                         id: input.sandbox.id,
 
@@ -142,7 +128,10 @@ export const sandboxRouter = createTRPCRouter({
                         tags: input.config?.tags,
                     });
 
-                    const previewUrl = getSandboxPreviewUrl(sandbox.id, input.sandbox.port);
+                    const previewUrl = getConfiguredSandboxPreviewUrl(
+                        sandbox.id,
+                        input.sandbox.port,
+                    );
 
                     return {
                         sandboxId: sandbox.id,
@@ -193,15 +182,16 @@ export const sandboxRouter = createTRPCRouter({
 
             for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
                 try {
-                    const CodesandboxProvider = await getStaticCodeProvider(
-                        CodeProvider.CodeSandbox,
-                    );
-                    const sandbox = await CodesandboxProvider.createProjectFromGit({
+                    const SandboxProvider = await getConfiguredSandboxStaticProvider();
+                    const sandbox = await SandboxProvider.createProjectFromGit({
                         repoUrl: input.repoUrl,
                         branch: input.branch,
                     });
 
-                    const previewUrl = getSandboxPreviewUrl(sandbox.id, DEFAULT_PORT);
+                    const previewUrl = getConfiguredSandboxPreviewUrl(
+                        sandbox.id,
+                        DEFAULT_PORT,
+                    );
 
                     return {
                         sandboxId: sandbox.id,

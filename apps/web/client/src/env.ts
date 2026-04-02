@@ -9,6 +9,14 @@ export const env = createEnv({
     server: {
         NODE_ENV: z.enum(['development', 'test', 'production']),
         CSB_API_KEY: z.string(),
+        SANDBOX_PROVIDER: z
+            .enum(['code_sandbox', 'e2b', 'daytona', 'vercel_sandbox', 'modal', 'node_fs'])
+            .default('code_sandbox'),
+        E2B_API_KEY: z.string().optional(),
+        E2B_DOMAIN: z.string().optional(),
+        E2B_TEMPLATE_EMPTY_NEXTJS: z.string().optional(),
+        E2B_TEMPLATE_BLANK: z.string().optional(),
+        E2B_TEMPLATE_GIT_REPO: z.string().optional(),
         SUPABASE_DATABASE_URL: z.url(),
         SUPABASE_SERVICE_ROLE_KEY: z.string(),
         RESEND_API_KEY: z.string().optional(),
@@ -74,6 +82,9 @@ export const env = createEnv({
         NEXT_PUBLIC_POSTHOG_HOST: z.string().optional(),
         NEXT_PUBLIC_GLEAP_API_KEY: z.string().optional(),
         NEXT_PUBLIC_FEATURE_COLLABORATION: z.coerce.boolean().default(false),
+        NEXT_PUBLIC_SANDBOX_PROVIDER: z
+            .enum(['code_sandbox', 'e2b', 'daytona', 'vercel_sandbox', 'modal', 'node_fs'])
+            .default('code_sandbox'),
         NEXT_PUBLIC_HOSTING_DOMAIN: z.string().optional(),
         NEXT_PUBLIC_RB2B_ID: z.string().optional(),
     },
@@ -85,6 +96,12 @@ export const env = createEnv({
     runtimeEnv: {
         NODE_ENV: process.env.NODE_ENV,
         CSB_API_KEY: process.env.CSB_API_KEY,
+        SANDBOX_PROVIDER: process.env.SANDBOX_PROVIDER,
+        E2B_API_KEY: process.env.E2B_API_KEY,
+        E2B_DOMAIN: process.env.E2B_DOMAIN,
+        E2B_TEMPLATE_EMPTY_NEXTJS: process.env.E2B_TEMPLATE_EMPTY_NEXTJS,
+        E2B_TEMPLATE_BLANK: process.env.E2B_TEMPLATE_BLANK,
+        E2B_TEMPLATE_GIT_REPO: process.env.E2B_TEMPLATE_GIT_REPO,
         RESEND_API_KEY: process.env.RESEND_API_KEY,
         NEXT_PUBLIC_FEATURE_COLLABORATION: process.env.NEXT_PUBLIC_FEATURE_COLLABORATION,
 
@@ -99,6 +116,8 @@ export const env = createEnv({
         NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY,
         NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST,
         NEXT_PUBLIC_GLEAP_API_KEY: process.env.NEXT_PUBLIC_GLEAP_API_KEY,
+        NEXT_PUBLIC_SANDBOX_PROVIDER:
+            process.env.NEXT_PUBLIC_SANDBOX_PROVIDER ?? process.env.SANDBOX_PROVIDER,
 
         // RB2B
         NEXT_PUBLIC_RB2B_ID: process.env.NEXT_PUBLIC_RB2B_ID,

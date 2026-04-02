@@ -37,6 +37,7 @@
         "@codesandbox/sdk": "^1.1.6",
         "@onlook/models": "*",
         "@onlook/parser": "*",
-        "@onlook/utility": "*"
+        "@onlook/utility": "*",
+        "e2b": "^2.19.0"
     }
 }

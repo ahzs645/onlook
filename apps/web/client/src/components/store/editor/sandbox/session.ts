@@ -1,7 +1,13 @@
 import { api } from '@/trpc/client';
-import { CodeProvider, createCodeProviderClient, type Provider } from '@onlook/code-provider';
+import {
+    CodeProvider,
+    createCodeProviderClient,
+    type E2BSession,
+    type Provider,
+} from '@onlook/code-provider';
 import type { Branch } from '@onlook/models';
 import { makeAutoObservable } from 'mobx';
+import { getConfiguredClientSandboxProvider } from '@/utils/sandbox-provider';
 import type { ErrorManager } from '../error';
 import { CLISessionImpl, CLISessionType, type CLISession, type TerminalSession } from './terminal';
 
@@ -29,18 +35,35 @@ export class SessionManager {
         this.isConnecting = true;
 
         const attemptConnection = async () => {
-            const provider = await createCodeProviderClient(CodeProvider.CodeSandbox, {
-                providerOptions: {
-                    codesandbox: {
-                        sandboxId,
-                        userId,
-                        initClient: true,
-                        getSession: async (sandboxId, userId) => {
-                            return api.sandbox.start.mutate({ sandboxId });
-                        },
-                    },
-                },
-            });
+            const sandboxProvider = getConfiguredClientSandboxProvider();
+            const provider =
+                sandboxProvider === CodeProvider.E2B
+                    ? await createCodeProviderClient(CodeProvider.E2B, {
+                          providerOptions: {
+                              e2b: {
+                                  sandboxId,
+                                  userId,
+                                  initClient: true,
+                                  getSession: async (targetSandboxId) => {
+                                      return api.sandbox.start.mutate({
+                                          sandboxId: targetSandboxId,
+                                      }) as Promise<E2BSession>;
+                                  },
+                              },
+                          },
+                      })
+                    : await createCodeProviderClient(CodeProvider.CodeSandbox, {
+                          providerOptions: {
+                              codesandbox: {
+                                  sandboxId,
+                                  userId,
+                                  initClient: true,
+                                  getSession: async (targetSandboxId) => {
+                                      return api.sandbox.start.mutate({ sandboxId: targetSandboxId });
+                                  },
+                              },
+                          },
+                      });
 
             this.provider = provider;
             await this.createTerminalSessions(provider);

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { createContext, useContext, useState } from 'react';
 
-import type { Provider } from '@onlook/code-provider';
+import type { E2BSession, Provider } from '@onlook/code-provider';
 import { CodeProvider, createCodeProviderClient } from '@onlook/code-provider';
 import { NEXT_JS_FILE_EXTENSIONS, SandboxTemplates, Templates } from '@onlook/constants';
 import { RouterType } from '@onlook/models';
@@ -14,6 +14,7 @@ import type { NextJsProjectValidation, ProcessedFile } from '@/app/projects/type
 import { ProcessedFileType } from '@/app/projects/types';
 import { api } from '@/trpc/react';
 import { Routes } from '@/utils/constants';
+import { getConfiguredClientSandboxProvider } from '@/utils/sandbox-provider';
 
 export interface Project {
     name: string;
@@ -135,19 +136,34 @@ export const ProjectCreationProvider = ({ children, totalSteps }: ProjectCreatio
                 },
             });
 
-            const provider = await createCodeProviderClient(CodeProvider.CodeSandbox, {
-                providerOptions: {
-                    codesandbox: {
-                        sandboxId: forkedSandbox.sandboxId,
-                        userId: user.id,
-                        initClient: true,
-                        keepActiveWhileConnected: false,
-                        getSession: async (sandboxId) => {
-                            return startSandbox({ sandboxId });
-                        },
-                    },
-                },
-            });
+            const sandboxProvider = getConfiguredClientSandboxProvider();
+            const provider =
+                sandboxProvider === CodeProvider.E2B
+                    ? await createCodeProviderClient(CodeProvider.E2B, {
+                          providerOptions: {
+                              e2b: {
+                                  sandboxId: forkedSandbox.sandboxId,
+                                  userId: user.id,
+                                  initClient: true,
+                                  getSession: async (sandboxId) => {
+                                      return startSandbox({ sandboxId }) as Promise<E2BSession>;
+                                  },
+                              },
+                          },
+                      })
+                    : await createCodeProviderClient(CodeProvider.CodeSandbox, {
+                          providerOptions: {
+                              codesandbox: {
+                                  sandboxId: forkedSandbox.sandboxId,
+                                  userId: user.id,
+                                  initClient: true,
+                                  keepActiveWhileConnected: false,
+                                  getSession: async (sandboxId) => {
+                                      return startSandbox({ sandboxId });
+                                  },
+                              },
+                          },
+                      });
 
             await uploadToSandbox(projectData.files, provider);
             await provider.setup({});

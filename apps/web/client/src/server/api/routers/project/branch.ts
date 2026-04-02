@@ -1,5 +1,4 @@
-import { CodeProvider, getStaticCodeProvider } from '@onlook/code-provider';
-import { getSandboxPreviewUrl, SandboxTemplates, Templates } from '@onlook/constants';
+import { Templates } from '@onlook/constants';
 import { branches, branchInsertSchema, branchUpdateSchema, canvases, createDefaultFrame, frames, fromDbBranch, fromDbFrame } from '@onlook/db';
 import type { Frame } from '@onlook/models';
 import { calculateNonOverlappingPosition, generateUniqueBranchName } from '@onlook/utility';
@@ -7,6 +6,11 @@ import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
+import {
+    getConfiguredSandboxPreviewUrl,
+    getConfiguredSandboxStaticProvider,
+    getConfiguredSandboxTemplate,
+} from '@/server/sandbox/provider';
 import { createTRPCRouter, protectedProcedure } from '../../trpc';
 import { extractCsbPort } from './helper';
 
@@ -115,8 +119,8 @@ export const branchRouter = createTRPCRouter({
                 const branchName: string = generateUniqueBranchName(sourceBranch.name, existingNames);
 
                 // Fork the sandbox using code provider
-                const CodesandboxProvider = await getStaticCodeProvider(CodeProvider.CodeSandbox);
-                const forkedSandbox = await CodesandboxProvider.createProject({
+                const SandboxProvider = await getConfiguredSandboxStaticProvider();
+                const forkedSandbox = await SandboxProvider.createProject({
                     source: 'template',
                     id: sourceBranch.sandboxId,
                     title: branchName,
@@ -126,7 +130,7 @@ export const branchRouter = createTRPCRouter({
                 const sandboxId = forkedSandbox.id;
                 // Extract port from source branch frames or fall back to 3000
                 const port = extractCsbPort(sourceBranch.frames) ?? 3000;
-                const previewUrl = getSandboxPreviewUrl(sandboxId, port);
+                const previewUrl = getConfiguredSandboxPreviewUrl(sandboxId, port);
 
                 // Create new branch
                 const newBranchId = uuidv4();
@@ -258,10 +262,11 @@ export const branchRouter = createTRPCRouter({
                     }
 
                     // Create new blank sandbox
-                    const CodesandboxProvider = await getStaticCodeProvider(CodeProvider.CodeSandbox);
-                    const blankSandbox = await CodesandboxProvider.createProject({
+                    const SandboxProvider = await getConfiguredSandboxStaticProvider();
+                    const template = getConfiguredSandboxTemplate(Templates.EMPTY_NEXTJS);
+                    const blankSandbox = await SandboxProvider.createProject({
                         source: 'template',
-                        id: SandboxTemplates[Templates.EMPTY_NEXTJS].id,
+                        id: template.id,
                         title: branchName,
                         tags: ['blank'],
                     });
@@ -270,7 +275,7 @@ export const branchRouter = createTRPCRouter({
                     // Extract port from existing project frames or fall back to 3000
                     const allFrames = existingBranches.flatMap(branch => branch.frames || []);
                     const port = extractCsbPort(allFrames) ?? 3000;
-                    const previewUrl = getSandboxPreviewUrl(sandboxId, port);
+                    const previewUrl = getConfiguredSandboxPreviewUrl(sandboxId, port);
 
                     // Create new branch
                     const newBranchId = uuidv4();

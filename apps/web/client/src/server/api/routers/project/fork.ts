@@ -1,7 +1,10 @@
 import { protectedProcedure } from '@/server/api/trpc';
+import {
+    getConfiguredSandboxPreviewUrl,
+    getConfiguredSandboxStaticProvider,
+} from '@/server/sandbox/provider';
 import { trackEvent } from '@/utils/analytics/server';
-import { CodeProvider, getStaticCodeProvider } from '@onlook/code-provider';
-import { getSandboxPreviewUrl, Tags } from '@onlook/constants';
+import { Tags } from '@onlook/constants';
 import {
     branches,
     canvases,
@@ -56,7 +59,7 @@ async function forkAllBranches(
     sourceBranches: Branch[],
     sourceProjectName: string
 ): Promise<Map<string, ForkedBranch>> {
-    const CodesandboxProvider = await getStaticCodeProvider(CodeProvider.CodeSandbox);
+    const SandboxProvider = await getConfiguredSandboxStaticProvider();
     const branchMapping = new Map<string, ForkedBranch>();
 
     for (const sourceBranch of sourceBranches) {
@@ -64,14 +67,14 @@ async function forkAllBranches(
             throw new Error(`Branch ${sourceBranch.name} has no sandbox ID`);
         }
 
-        const newSandbox = await CodesandboxProvider.createProject({
+        const newSandbox = await SandboxProvider.createProject({
             source: 'template',
             id: sourceBranch.sandboxId,
             title: `${sourceProjectName} (Fork) - ${sourceBranch.name}`,
             tags: ['template-fork'],
         });
 
-        const newSandboxUrl = getSandboxPreviewUrl(newSandbox.id, 3000);
+        const newSandboxUrl = getConfiguredSandboxPreviewUrl(newSandbox.id, 3000);
         const newBranch: Branch = {
             ...sourceBranch,
             id: uuidv4(),
