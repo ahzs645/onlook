@@ -2,7 +2,6 @@ import { api } from '@/trpc/client';
 import {
     CodeProvider,
     createCodeProviderClient,
-    type E2BSession,
     type Provider,
 } from '@onlook/code-provider';
 import type { Branch } from '@onlook/models';
@@ -36,34 +35,22 @@ export class SessionManager {
 
         const attemptConnection = async () => {
             const sandboxProvider = getConfiguredClientSandboxProvider();
-            const provider =
-                sandboxProvider === CodeProvider.E2B
-                    ? await createCodeProviderClient(CodeProvider.E2B, {
-                          providerOptions: {
-                              e2b: {
-                                  sandboxId,
-                                  userId,
-                                  initClient: true,
-                                  getSession: async (targetSandboxId) => {
-                                      return api.sandbox.start.mutate({
-                                          sandboxId: targetSandboxId,
-                                      }) as Promise<E2BSession>;
-                                  },
-                              },
-                          },
-                      })
-                    : await createCodeProviderClient(CodeProvider.CodeSandbox, {
-                          providerOptions: {
-                              codesandbox: {
-                                  sandboxId,
-                                  userId,
-                                  initClient: true,
-                                  getSession: async (targetSandboxId) => {
-                                      return api.sandbox.start.mutate({ sandboxId: targetSandboxId });
-                                  },
-                              },
-                          },
-                      });
+            if (sandboxProvider === CodeProvider.E2B) {
+                throw new Error('E2B browser sandbox sessions are not implemented yet.');
+            }
+
+            const provider = await createCodeProviderClient(CodeProvider.CodeSandbox, {
+                providerOptions: {
+                    codesandbox: {
+                        sandboxId,
+                        userId,
+                        initClient: true,
+                        getSession: async (targetSandboxId) => {
+                            return api.sandbox.start.mutate({ sandboxId: targetSandboxId });
+                        },
+                    },
+                },
+            });
 
             this.provider = provider;
             await this.createTerminalSessions(provider);

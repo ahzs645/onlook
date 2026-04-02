@@ -19,7 +19,6 @@ import {
     type CreateProjectInput,
     type CreateProjectOutput,
     type CreateSessionInput,
-    type CreateSessionOutput,
     type CreateTerminalInput,
     type CreateTerminalOutput,
     type DeleteFilesInput,
@@ -59,23 +58,7 @@ import {
     type WriteFileInput,
     type WriteFileOutput,
 } from '../../types';
-
-export interface E2BSession extends CreateSessionOutput {
-    sandboxId: string;
-    accessToken?: string;
-    domain?: string;
-}
-
-export interface E2BProviderOptions {
-    sandboxId?: string;
-    userId?: string;
-    apiKey?: string;
-    accessToken?: string;
-    domain?: string;
-    timeoutMs?: number;
-    initClient?: boolean;
-    getSession?: (sandboxId: string, userId?: string) => Promise<E2BSession | null>;
-}
+import type { E2BProviderOptions, E2BSession } from './types';
 
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const textDecoder = new TextDecoder();

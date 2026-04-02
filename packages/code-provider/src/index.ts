@@ -1,11 +1,10 @@
 import { CodeProvider } from './providers';
 import { CodesandboxProvider, type CodesandboxProviderOptions } from './providers/codesandbox';
-import { E2BProvider, type E2BProviderOptions, type E2BSession } from './providers/e2b';
+import type { E2BProviderOptions, E2BSession } from './providers/e2b/types';
 import { NodeFsProvider, type NodeFsProviderOptions } from './providers/nodefs';
 export * from './providers';
 export { CodesandboxProvider } from './providers/codesandbox';
-export { E2BProvider } from './providers/e2b';
-export type { E2BProviderOptions, E2BSession } from './providers/e2b';
+export type { E2BProviderOptions, E2BSession } from './providers/e2b/types';
 export { NodeFsProvider } from './providers/nodefs';
 export * from './types';
 
@@ -28,13 +27,13 @@ export async function createCodeProviderClient(
 
 export async function getStaticCodeProvider(
     codeProvider: CodeProvider,
-): Promise<typeof CodesandboxProvider | typeof E2BProvider | typeof NodeFsProvider> {
+): Promise<typeof CodesandboxProvider | typeof NodeFsProvider> {
     if (codeProvider === CodeProvider.CodeSandbox) {
         return CodesandboxProvider;
     }
 
     if (codeProvider === CodeProvider.E2B) {
-        return E2BProvider;
+        throw new Error('E2B provider must be loaded from a server-only module');
     }
 
     if (codeProvider === CodeProvider.NodeFs) {
@@ -58,10 +57,7 @@ function newProviderInstance(codeProvider: CodeProvider, providerOptions: Provid
     }
 
     if (codeProvider === CodeProvider.E2B) {
-        if (!providerOptions.e2b) {
-            throw new Error('E2B provider options are required.');
-        }
-        return new E2BProvider(providerOptions.e2b);
+        throw new Error('E2B provider must be instantiated from a server-only module');
     }
 
     if (codeProvider === CodeProvider.NodeFs) {

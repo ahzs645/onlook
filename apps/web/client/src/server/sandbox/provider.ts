@@ -1,5 +1,10 @@
 import { env } from '@/env';
-import { CodeProvider, createCodeProviderClient, getStaticCodeProvider } from '@onlook/code-provider';
+import {
+    CodeProvider,
+    CodesandboxProvider,
+    NodeFsProvider,
+    type Provider,
+} from '@onlook/code-provider';
 import { getSandboxPreviewUrl, SandboxTemplates, Templates } from '@onlook/constants';
 
 export function getConfiguredSandboxProvider(): CodeProvider {
@@ -47,30 +52,36 @@ export function getConfiguredSandboxPreviewUrl(
 export async function createConfiguredSandboxProviderClient(params: {
     sandboxId: string;
     userId?: string;
-}) {
+}): Promise<Provider> {
     if (getConfiguredSandboxProvider() === CodeProvider.E2B) {
-        return createCodeProviderClient(CodeProvider.E2B, {
-            providerOptions: {
-                e2b: {
-                    sandboxId: params.sandboxId,
-                    userId: params.userId,
-                    apiKey: env.E2B_API_KEY,
-                    domain: env.E2B_DOMAIN,
-                },
-            },
+        const { E2BProvider } = await import('@onlook/code-provider/src/providers/e2b');
+        const provider = new E2BProvider({
+            sandboxId: params.sandboxId,
+            userId: params.userId,
+            apiKey: env.E2B_API_KEY,
+            domain: env.E2B_DOMAIN,
         });
+        await provider.initialize({});
+        return provider;
     }
 
-    return createCodeProviderClient(CodeProvider.CodeSandbox, {
-        providerOptions: {
-            codesandbox: {
-                sandboxId: params.sandboxId,
-                userId: params.userId,
-            },
-        },
+    const provider = new CodesandboxProvider({
+        sandboxId: params.sandboxId,
+        userId: params.userId,
     });
+    await provider.initialize({});
+    return provider;
 }
 
 export async function getConfiguredSandboxStaticProvider() {
-    return getStaticCodeProvider(getConfiguredSandboxProvider());
+    if (getConfiguredSandboxProvider() === CodeProvider.E2B) {
+        const { E2BProvider } = await import('@onlook/code-provider/src/providers/e2b');
+        return E2BProvider;
+    }
+
+    if (getConfiguredSandboxProvider() === CodeProvider.NodeFs) {
+        return NodeFsProvider;
+    }
+
+    return CodesandboxProvider;
 }

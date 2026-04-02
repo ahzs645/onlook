@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { createContext, useContext, useState } from 'react';
 
-import type { E2BSession, Provider } from '@onlook/code-provider';
+import type { Provider } from '@onlook/code-provider';
 import { CodeProvider, createCodeProviderClient } from '@onlook/code-provider';
 import { NEXT_JS_FILE_EXTENSIONS, SandboxTemplates, Templates } from '@onlook/constants';
 import { RouterType } from '@onlook/models';
@@ -137,33 +137,23 @@ export const ProjectCreationProvider = ({ children, totalSteps }: ProjectCreatio
             });
 
             const sandboxProvider = getConfiguredClientSandboxProvider();
-            const provider =
-                sandboxProvider === CodeProvider.E2B
-                    ? await createCodeProviderClient(CodeProvider.E2B, {
-                          providerOptions: {
-                              e2b: {
-                                  sandboxId: forkedSandbox.sandboxId,
-                                  userId: user.id,
-                                  initClient: true,
-                                  getSession: async (sandboxId) => {
-                                      return startSandbox({ sandboxId }) as Promise<E2BSession>;
-                                  },
-                              },
-                          },
-                      })
-                    : await createCodeProviderClient(CodeProvider.CodeSandbox, {
-                          providerOptions: {
-                              codesandbox: {
-                                  sandboxId: forkedSandbox.sandboxId,
-                                  userId: user.id,
-                                  initClient: true,
-                                  keepActiveWhileConnected: false,
-                                  getSession: async (sandboxId) => {
-                                      return startSandbox({ sandboxId });
-                                  },
-                              },
-                          },
-                      });
+            if (sandboxProvider === CodeProvider.E2B) {
+                throw new Error('Local import is not implemented for E2B sandboxes yet.');
+            }
+
+            const provider = await createCodeProviderClient(CodeProvider.CodeSandbox, {
+                providerOptions: {
+                    codesandbox: {
+                        sandboxId: forkedSandbox.sandboxId,
+                        userId: user.id,
+                        initClient: true,
+                        keepActiveWhileConnected: false,
+                        getSession: async (sandboxId) => {
+                            return startSandbox({ sandboxId });
+                        },
+                    },
+                },
+            });
 
             await uploadToSandbox(projectData.files, provider);
             await provider.setup({});
