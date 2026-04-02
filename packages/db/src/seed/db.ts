@@ -297,6 +297,7 @@ const rateLimit0 = {
 
 export const seedDb = async () => {
     console.log('Seeding the database...');
+    const includeSampleProjects = process.env.ONLOOK_SEED_SAMPLE_PROJECTS === 'true';
 
     await db.transaction(async (tx) => {
         await tx.insert(users).values(user0);
@@ -304,25 +305,27 @@ export const seedDb = async () => {
         await tx.insert(prices).values([price0]);
         await tx.insert(subscriptions).values([subscription0]);
         await tx.insert(rateLimits).values([rateLimit0]);
-        await tx.insert(projects).values([project0, project1]);
-        await tx.insert(branches).values([branch0, branch1, branch2, branch3]);
-        await tx.insert(userProjects).values([
-            {
-                userId: user0.id,
-                projectId: project0.id,
-                role: ProjectRole.OWNER,
-            },
-            {
-                userId: user0.id,
-                projectId: project1.id,
-                role: ProjectRole.OWNER,
-            },
-        ]);
-        await tx.insert(canvases).values([canvas0, canvas1]);
-        await tx.insert(userCanvases).values([userCanvas0, userCanvas1]);
-        await tx.insert(frames).values([frame0, frame1]);
-        await tx.insert(conversations).values([conversation0]);
-        await tx.insert(messages).values([message0, message1, message2, message3, message4]);
+        if (includeSampleProjects) {
+            await tx.insert(projects).values([project0, project1]);
+            await tx.insert(branches).values([branch0, branch1, branch2, branch3]);
+            await tx.insert(userProjects).values([
+                {
+                    userId: user0.id,
+                    projectId: project0.id,
+                    role: ProjectRole.OWNER,
+                },
+                {
+                    userId: user0.id,
+                    projectId: project1.id,
+                    role: ProjectRole.OWNER,
+                },
+            ]);
+            await tx.insert(canvases).values([canvas0, canvas1]);
+            await tx.insert(userCanvases).values([userCanvas0, userCanvas1]);
+            await tx.insert(frames).values([frame0, frame1]);
+            await tx.insert(conversations).values([conversation0]);
+            await tx.insert(messages).values([message0, message1, message2, message3, message4]);
+        }
     });
 
     console.log('Database seeded!');

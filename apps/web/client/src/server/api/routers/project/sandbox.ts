@@ -1,14 +1,14 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import { CodeProvider } from '@onlook/code-provider';
 import { Templates } from '@onlook/constants';
 import { shortenUuid } from '@onlook/utility/src/id';
 
 import {
+    assertSandboxConfiguration,
+    assertSandboxIdIsUsable,
     createConfiguredSandboxProviderClient,
     getConfiguredSandboxPreviewUrl,
-    getConfiguredSandboxProvider,
     getConfiguredSandboxStaticProvider,
     getConfiguredSandboxTemplate,
 } from '@/server/sandbox/provider';
@@ -35,6 +35,8 @@ export const sandboxRouter = createTRPCRouter({
             }),
         )
         .mutation(async ({ input, ctx }) => {
+            assertSandboxConfiguration();
+
             // Create a new sandbox using the static provider
             const SandboxProvider = await getConfiguredSandboxStaticProvider();
 
@@ -61,6 +63,8 @@ export const sandboxRouter = createTRPCRouter({
             }),
         )
         .mutation(async ({ input, ctx }) => {
+            assertSandboxIdIsUsable(input.sandboxId);
+
             const userId = ctx.user.id;
             const provider = await getProvider({
                 sandboxId: input.sandboxId,
@@ -81,6 +85,8 @@ export const sandboxRouter = createTRPCRouter({
             }),
         )
         .mutation(async ({ input }) => {
+            assertSandboxIdIsUsable(input.sandboxId);
+
             const provider = await getProvider({ sandboxId: input.sandboxId });
             try {
                 await provider.pauseProject({});
@@ -89,6 +95,8 @@ export const sandboxRouter = createTRPCRouter({
             }
         }),
     list: protectedProcedure.input(z.object({ sandboxId: z.string() })).query(async ({ input }) => {
+        assertSandboxIdIsUsable(input.sandboxId);
+
         const provider = await getProvider({ sandboxId: input.sandboxId });
         const res = await provider.listProjects({});
         // TODO future iteration of code provider abstraction will need this code to be refactored
@@ -113,6 +121,8 @@ export const sandboxRouter = createTRPCRouter({
             }),
         )
         .mutation(async ({ input }) => {
+            assertSandboxConfiguration();
+
             const MAX_RETRY_ATTEMPTS = 3;
             let lastError: Error | null = null;
 
@@ -161,6 +171,8 @@ export const sandboxRouter = createTRPCRouter({
             }),
         )
         .mutation(async ({ input }) => {
+            assertSandboxIdIsUsable(input.sandboxId);
+
             const provider = await getProvider({ sandboxId: input.sandboxId });
             try {
                 await provider.stopProject({});
@@ -176,6 +188,8 @@ export const sandboxRouter = createTRPCRouter({
             }),
         )
         .mutation(async ({ input }) => {
+            assertSandboxConfiguration();
+
             const MAX_RETRY_ATTEMPTS = 3;
             const DEFAULT_PORT = 3000;
             let lastError: Error | null = null;

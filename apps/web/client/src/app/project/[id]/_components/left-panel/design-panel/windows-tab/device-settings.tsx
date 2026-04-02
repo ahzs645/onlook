@@ -12,11 +12,12 @@ export const DeviceSettings = observer(({ frameId }: { frameId: string }) => {
     const [theme, setTheme] = useState<SystemTheme>(SystemTheme.SYSTEM);
 
     useEffect(() => {
-        if (!frameData?.view) {
-            console.error('No frame view found');
+        if (!frameData?.view || typeof frameData.view.getTheme !== 'function') {
             return;
         }
-        frameData.view.getTheme().then((theme) => setTheme(theme));
+        frameData.view.getTheme().then((theme) => setTheme(theme)).catch((error) => {
+            console.warn('Failed to read frame theme', error);
+        });
     }, [frameData]);
 
     if (!frameData) {
@@ -29,12 +30,12 @@ export const DeviceSettings = observer(({ frameId }: { frameId: string }) => {
         const previousTheme = theme;
         setTheme(newTheme);
 
-        if (!frameData?.view) {
-            console.error('No frame view found');
+        if (!frameData?.view || typeof frameData.view.setTheme !== 'function') {
+            setTheme(previousTheme);
             return;
         }
 
-        const success = await frameData?.view.setTheme(newTheme);
+        const success = await frameData.view.setTheme(newTheme);
         if (!success) {
             toast.error('Failed to change theme');
             setTheme(previousTheme);

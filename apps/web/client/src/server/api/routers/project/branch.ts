@@ -7,6 +7,8 @@ import { and, eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import {
+    assertSandboxConfiguration,
+    assertSandboxIdIsUsable,
     getConfiguredSandboxPreviewUrl,
     getConfiguredSandboxStaticProvider,
     getConfiguredSandboxTemplate,
@@ -94,6 +96,8 @@ export const branchRouter = createTRPCRouter({
         )
         .mutation(async ({ ctx, input }) => {
             try {
+                assertSandboxConfiguration();
+
                 // Get source branch with its frames to extract port
                 const sourceBranch = await ctx.db.query.branches.findFirst({
                     where: eq(branches.id, input.branchId),
@@ -108,6 +112,8 @@ export const branchRouter = createTRPCRouter({
                         message: 'Source branch not found',
                     });
                 }
+
+                assertSandboxIdIsUsable(sourceBranch.sandboxId);
 
                 // Get existing branch names for unique name generation
                 const existingBranches = await ctx.db.query.branches.findMany({
@@ -242,6 +248,8 @@ export const branchRouter = createTRPCRouter({
         )
         .mutation(async ({ ctx, input }) => {
             try {
+                assertSandboxConfiguration();
+
                 return await ctx.db.transaction(async (tx) => {
                     // Get existing branches with frames for unique name generation and port extraction
                     const existingBranches = await tx.query.branches.findMany({

@@ -7,6 +7,7 @@ import {
 import type { Branch } from '@onlook/models';
 import { makeAutoObservable } from 'mobx';
 import { getConfiguredClientSandboxProvider } from '@/utils/sandbox-provider';
+import { isFatalSandboxErrorMessage } from '@/utils/sandbox-errors';
 import type { ErrorManager } from '../error';
 import { CLISessionImpl, CLISessionType, type CLISession, type TerminalSession } from './terminal';
 
@@ -69,6 +70,10 @@ export class SessionManager {
 
                 this.provider = null;
 
+                if (isFatalSandboxErrorMessage(lastError.message)) {
+                    break;
+                }
+
                 if (attempt < MAX_RETRIES) {
                     console.log(`Retrying sandbox connection in ${RETRY_DELAY_MS}ms...`);
                     await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
@@ -82,7 +87,6 @@ export class SessionManager {
 
     async restartDevServer(): Promise<boolean> {
         if (!this.provider) {
-            console.error('No provider found in restartDevServer');
             return false;
         }
         const { task } = await this.provider.getTask({
@@ -158,7 +162,6 @@ export class SessionManager {
     async reconnect(sandboxId: string, userId?: string) {
         try {
             if (!this.provider) {
-                console.error('No provider found in reconnect');
                 return;
             }
 

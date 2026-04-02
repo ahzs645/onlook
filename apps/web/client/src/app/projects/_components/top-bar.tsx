@@ -5,6 +5,7 @@ import { CurrentUserAvatar } from '@/components/ui/avatar-dropdown';
 import { transKeys } from '@/i18n/keys';
 import { api } from '@/trpc/react';
 import { LocalForageKeys, Routes } from '@/utils/constants';
+import { getSandboxUserFacingError } from '@/utils/sandbox-errors';
 import { SandboxTemplates, Templates } from '@onlook/constants';
 import { Button } from '@onlook/ui/button';
 import {
@@ -148,17 +149,8 @@ export const TopBar = ({ searchQuery, onSearchChange }: TopBarProps) => {
             }
         } catch (error) {
             console.error('Error creating blank project:', error);
-            const errorMessage = error instanceof Error ? error.message : String(error);
-
-            if (errorMessage.includes('502') || errorMessage.includes('sandbox')) {
-                toast.error('Sandbox service temporarily unavailable', {
-                    description: 'Please try again in a few moments. Our servers may be experiencing high load.',
-                });
-            } else {
-                toast.error('Failed to create project', {
-                    description: errorMessage,
-                });
-            }
+            const { title, description } = getSandboxUserFacingError(error);
+            toast.error(title, { description });
         } finally {
             setIsCreatingProject(false);
         }

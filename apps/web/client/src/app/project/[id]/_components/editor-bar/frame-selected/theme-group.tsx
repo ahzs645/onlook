@@ -10,13 +10,16 @@ export function ThemeGroup({ frameData }: { frameData: FrameData }) {
     const [theme, setTheme] = useState<SystemTheme>(SystemTheme.SYSTEM);
     useEffect(() => {
         const getTheme = async () => {
-            if (!frameData?.view) {
-                console.error('No frame view found');
+            if (!frameData?.view || typeof frameData.view.getTheme !== 'function') {
                 return;
             }
 
-            const theme = await frameData.view.getTheme();
-            setTheme(theme);
+            try {
+                const theme = await frameData.view.getTheme();
+                setTheme(theme);
+            } catch (error) {
+                console.warn('Failed to read frame theme', error);
+            }
         }
         void getTheme();
     }, [frameData]);
@@ -24,7 +27,12 @@ export function ThemeGroup({ frameData }: { frameData: FrameData }) {
     async function changeTheme(newTheme: SystemTheme) {
         const previousTheme = theme;
         setTheme(newTheme);
-        const success = await frameData.view?.setTheme(newTheme);
+        if (!frameData.view || typeof frameData.view.setTheme !== 'function') {
+            setTheme(previousTheme);
+            return;
+        }
+
+        const success = await frameData.view.setTheme(newTheme);
         if (!success) {
             toast.error('Failed to change theme');
             setTheme(previousTheme);

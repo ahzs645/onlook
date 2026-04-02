@@ -3,6 +3,7 @@
 import { useAuthContext } from '@/app/auth/auth-context';
 import { api } from '@/trpc/react';
 import { LocalForageKeys, Routes } from '@/utils/constants';
+import { getSandboxUserFacingError } from '@/utils/sandbox-errors';
 import { SandboxTemplates, Templates } from '@onlook/constants';
 import localforage from 'localforage';
 import { useRouter } from 'next/navigation';
@@ -52,17 +53,8 @@ export function useCreateBlankProject() {
             }
         } catch (error) {
             console.error('Error creating blank project:', error);
-            const errorMessage = error instanceof Error ? error.message : String(error);
-
-            if (errorMessage.includes('502') || errorMessage.includes('sandbox')) {
-                toast.error('Sandbox service temporarily unavailable', {
-                    description: 'Please try again in a few moments. Our servers may be experiencing high load.',
-                });
-            } else {
-                toast.error('Failed to create project', {
-                    description: errorMessage,
-                });
-            }
+            const { title, description } = getSandboxUserFacingError(error);
+            toast.error(title, { description });
         } finally {
             setIsCreatingProject(false);
         }
