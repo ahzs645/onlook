@@ -12,6 +12,7 @@ import {
     getConfiguredSandboxPreviewUrl,
     getConfiguredSandboxStaticProvider,
     getConfiguredSandboxTemplate,
+    waitForSandboxPreviewReady,
 } from '@/server/sandbox/provider';
 import { createTRPCRouter, protectedProcedure } from '../../trpc';
 import { extractCsbPort } from './helper';
@@ -137,6 +138,7 @@ export const branchRouter = createTRPCRouter({
                 // Extract port from source branch frames or fall back to 3000
                 const port = extractCsbPort(sourceBranch.frames) ?? 3000;
                 const previewUrl = getConfiguredSandboxPreviewUrl(sandboxId, port);
+                await waitForSandboxPreviewReady(previewUrl);
 
                 // Create new branch
                 const newBranchId = uuidv4();
@@ -284,6 +286,7 @@ export const branchRouter = createTRPCRouter({
                     const allFrames = existingBranches.flatMap(branch => branch.frames || []);
                     const port = extractCsbPort(allFrames) ?? 3000;
                     const previewUrl = getConfiguredSandboxPreviewUrl(sandboxId, port);
+                    await waitForSandboxPreviewReady(previewUrl);
 
                     // Create new branch
                     const newBranchId = uuidv4();

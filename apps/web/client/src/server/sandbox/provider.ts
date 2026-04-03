@@ -108,6 +108,51 @@ export function getConfiguredSandboxPreviewUrl(
     return getSandboxPreviewUrl(sandboxId, port);
 }
 
+export async function waitForSandboxPreviewReady(
+    previewUrl: string,
+    {
+        timeoutMs = 45_000,
+        pollIntervalMs = 2_000,
+        requestTimeoutMs = 5_000,
+    }: {
+        timeoutMs?: number;
+        pollIntervalMs?: number;
+        requestTimeoutMs?: number;
+    } = {},
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let lastStatus: number | null = null;
+    let lastError: string | null = null;
+
+    while (Date.now() < deadline) {
+        try {
+            const response = await fetch(previewUrl, {
+                method: 'GET',
+                redirect: 'manual',
+                cache: 'no-store',
+                signal: AbortSignal.timeout(requestTimeoutMs),
+            });
+
+            lastStatus = response.status;
+            if (response.status >= 200 && response.status < 400) {
+                return;
+            }
+        } catch (error) {
+            lastError = error instanceof Error ? error.message : String(error);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+
+    console.warn(
+        `[SandboxProvider] Preview did not become ready within ${timeoutMs}ms for ${previewUrl}.`,
+        {
+            lastStatus,
+            lastError,
+        },
+    );
+}
+
 export async function createConfiguredSandboxProviderClient(params: {
     sandboxId: string;
     userId?: string;

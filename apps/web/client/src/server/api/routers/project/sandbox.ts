@@ -11,6 +11,7 @@ import {
     getConfiguredSandboxPreviewUrl,
     getConfiguredSandboxStaticProvider,
     getConfiguredSandboxTemplate,
+    waitForSandboxPreviewReady,
 } from '@/server/sandbox/provider';
 import { createTRPCRouter, protectedProcedure } from '../../trpc';
 
@@ -49,10 +50,12 @@ export const sandboxRouter = createTRPCRouter({
                 description: 'Test sandbox for Onlook sync engine',
                 tags: ['onlook-test'],
             });
+            const previewUrl = getConfiguredSandboxPreviewUrl(newSandbox.id, template.port);
+            await waitForSandboxPreviewReady(previewUrl);
 
             return {
                 sandboxId: newSandbox.id,
-                previewUrl: getConfiguredSandboxPreviewUrl(newSandbox.id, template.port),
+                previewUrl,
             };
         }),
 
@@ -142,6 +145,7 @@ export const sandboxRouter = createTRPCRouter({
                         sandbox.id,
                         input.sandbox.port,
                     );
+                    await waitForSandboxPreviewReady(previewUrl);
 
                     return {
                         sandboxId: sandbox.id,
@@ -206,6 +210,7 @@ export const sandboxRouter = createTRPCRouter({
                         sandbox.id,
                         DEFAULT_PORT,
                     );
+                    await waitForSandboxPreviewReady(previewUrl);
 
                     return {
                         sandboxId: sandbox.id,

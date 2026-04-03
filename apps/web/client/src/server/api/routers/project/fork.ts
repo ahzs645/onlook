@@ -2,6 +2,7 @@ import { protectedProcedure } from '@/server/api/trpc';
 import {
     getConfiguredSandboxPreviewUrl,
     getConfiguredSandboxStaticProvider,
+    waitForSandboxPreviewReady,
 } from '@/server/sandbox/provider';
 import { trackEvent } from '@/utils/analytics/server';
 import { Tags } from '@onlook/constants';
@@ -75,6 +76,7 @@ async function forkAllBranches(
         });
 
         const newSandboxUrl = getConfiguredSandboxPreviewUrl(newSandbox.id, 3000);
+        await waitForSandboxPreviewReady(newSandboxUrl);
         const newBranch: Branch = {
             ...sourceBranch,
             id: uuidv4(),
