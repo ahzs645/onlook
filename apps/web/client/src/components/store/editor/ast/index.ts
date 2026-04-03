@@ -63,7 +63,6 @@ export class AstManager {
 
     private async processNodeForMap(frameId: string, node: LayerNode) {
         if (!node.oid) {
-            console.warn('Failed to processNodeForMap: No oid found');
             return;
         }
 

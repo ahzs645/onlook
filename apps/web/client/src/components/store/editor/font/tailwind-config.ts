@@ -14,6 +14,10 @@ export const removeFontFromTailwindConfig = async (
     sandbox: SandboxManager,
 ): Promise<boolean> => {
     try {
+        if (!(await sandbox.fileExists(tailwindConfigPath))) {
+            return true;
+        }
+
         const file = await sandbox.readFile(tailwindConfigPath);
         if (typeof file !== 'string') {
             console.error("Tailwind config file is not text");
@@ -42,6 +46,10 @@ export const addFontToTailwindConfig = async (
     sandbox: SandboxManager,
 ): Promise<boolean> => {
     try {
+        if (!(await sandbox.fileExists(tailwindConfigPath))) {
+            return true;
+        }
+
         const file = await sandbox.readFile(tailwindConfigPath);
         if (typeof file !== 'string') {
             console.error("Tailwind config file is not text");

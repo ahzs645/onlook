@@ -300,6 +300,37 @@ export class CodeProviderSync {
         return files;
     }
 
+    private async syncProviderFileToLocal(
+        providerPath: string,
+        localPath: string,
+        content: string | Uint8Array,
+    ): Promise<void> {
+        const incomingHash = await hashContent(content);
+        const existingHash = this.fileHashes.get(localPath);
+
+        if (incomingHash === existingHash) {
+            console.debug(`[Sync] Skipping ${localPath} - content unchanged`);
+            return;
+        }
+
+        await this.fs.writeFile(localPath, content);
+
+        const normalizedContent = await this.fs.readFile(localPath);
+        const normalizedHash = await hashContent(normalizedContent);
+
+        if (normalizedHash !== incomingHash) {
+            await this.provider.writeFile({
+                args: {
+                    path: providerPath,
+                    content: normalizedContent,
+                    overwrite: true,
+                },
+            });
+        }
+
+        this.fileHashes.set(localPath, normalizedHash);
+    }
+
     private async pushModifiedFilesToSandbox(): Promise<void> {
         console.log('[Sync] Pushing locally modified files back to sandbox...');
 
@@ -412,9 +443,11 @@ export class CodeProviderSync {
                                                 (file.type === 'text' || file.type === 'binary') &&
                                                 file.content
                                             ) {
-                                                await this.fs.writeFile(newPath, file.content);
-                                                const hash = await hashContent(file.content);
-                                                this.fileHashes.set(newPath, hash);
+                                                await this.syncProviderFileToLocal(
+                                                    newPath,
+                                                    newPath,
+                                                    file.content,
+                                                );
                                             }
                                         } catch (error) {
                                             console.error(
@@ -518,19 +551,11 @@ export class CodeProviderSync {
                                             file.content
                                         ) {
                                             const localPath = normalizedPath;
-
-                                            // Check if content has changed
-                                            const newHash = await hashContent(file.content);
-                                            const existingHash = this.fileHashes.get(localPath);
-
-                                            if (newHash !== existingHash) {
-                                                await this.fs.writeFile(localPath, file.content);
-                                                this.fileHashes.set(localPath, newHash);
-                                            } else {
-                                                console.debug(
-                                                    `[Sync] Skipping ${localPath} - content unchanged`,
-                                                );
-                                            }
+                                            await this.syncProviderFileToLocal(
+                                                normalizedPath,
+                                                localPath,
+                                                file.content,
+                                            );
                                         }
                                     }
                                 } catch (error) {

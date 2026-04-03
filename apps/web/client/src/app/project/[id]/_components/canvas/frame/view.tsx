@@ -12,6 +12,7 @@ import type {
     PromisifiedPendpalChildMethods,
 } from '@onlook/penpal';
 import { PENPAL_PARENT_CHANNEL } from '@onlook/penpal';
+import { SystemTheme } from '@onlook/models/assets';
 import { WebPreview, WebPreviewBody } from '@onlook/ui/ai-elements';
 import { cn } from '@onlook/ui/utils';
 
@@ -24,31 +25,65 @@ export type IFrameView = HTMLIFrameElement & {
     isLoading: () => boolean;
 } & PromisifiedPendpalChildMethods;
 
-// Creates a proxy that provides safe fallback methods for any property access
-const createSafeFallbackMethods = (): PromisifiedPendpalChildMethods => {
-    return new Proxy({} as PromisifiedPendpalChildMethods, {
-        get(_target, prop: string | symbol) {
-            if (typeof prop === 'symbol') return undefined;
+function isDestroyedConnectionError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
 
-            return async (..._args: any[]) => {
-                const method = String(prop);
-                if (
-                    method.startsWith('get') ||
-                    method.includes('capture') ||
-                    method.includes('build')
-                ) {
-                    return null;
-                }
-                if (method.includes('Count')) {
-                    return 0;
-                }
-                if (method.includes('Editable') || method.includes('supports')) {
-                    return false;
-                }
-                return undefined;
-            };
-        },
-    });
+    return error.message.toLowerCase().includes('destroyed connection');
+}
+
+const createSafeFallbackMethods = (): PromisifiedPendpalChildMethods => {
+    const fallbackUndefined = async () => undefined;
+    const fallbackNull = async () => null;
+    const fallbackFalse = async () => false;
+    const fallbackZero = async () => 0;
+    const fallbackTheme = async () => SystemTheme.SYSTEM;
+    const fallbackStyle = async () => ({});
+
+    return {
+        processDom: fallbackUndefined,
+        getElementAtLoc: fallbackNull,
+        getElementByDomId: fallbackNull,
+        setFrameId: fallbackUndefined,
+        setBranchId: fallbackUndefined,
+        getElementIndex: fallbackNull,
+        getComputedStyleByDomId: fallbackStyle,
+        updateElementInstance: fallbackUndefined,
+        getFirstOnlookElement: fallbackNull,
+        setElementType: fallbackUndefined,
+        getElementType: fallbackNull,
+        getParentElement: fallbackNull,
+        getChildrenCount: fallbackZero,
+        getOffsetParent: fallbackNull,
+        getActionLocation: fallbackNull,
+        getActionElement: fallbackNull,
+        getInsertLocation: fallbackNull,
+        getRemoveAction: fallbackNull,
+        getTheme: fallbackTheme,
+        setTheme: fallbackFalse,
+        startDrag: fallbackUndefined,
+        drag: fallbackUndefined,
+        dragAbsolute: fallbackUndefined,
+        endDragAbsolute: fallbackUndefined,
+        endDrag: fallbackUndefined,
+        endAllDrag: fallbackUndefined,
+        startEditingText: fallbackUndefined,
+        editText: fallbackUndefined,
+        stopEditingText: fallbackUndefined,
+        updateStyle: fallbackUndefined,
+        insertElement: fallbackUndefined,
+        removeElement: fallbackUndefined,
+        moveElement: fallbackUndefined,
+        groupElements: fallbackUndefined,
+        ungroupElements: fallbackUndefined,
+        insertImage: fallbackUndefined,
+        removeImage: fallbackUndefined,
+        isChildTextEditable: fallbackFalse,
+        handleBodyReady: fallbackUndefined,
+        captureScreenshot: fallbackNull,
+        buildLayerTree: fallbackNull,
+    } as unknown as PromisifiedPendpalChildMethods;
 };
 
 interface FrameViewProps extends IframeHTMLAttributes<HTMLIFrameElement> {
@@ -191,6 +226,10 @@ export const FrameComponent = observer(
                         if (!method) throw new Error('Method not initialized');
                         return method(...args);
                     } catch (error) {
+                        if (isDestroyedConnectionError(error)) {
+                            return;
+                        }
+
                         console.error(
                             `${PENPAL_PARENT_CHANNEL} (${frame.id}) - Method failed:`,
                             error,
@@ -283,9 +322,6 @@ export const FrameComponent = observer(
                 };
 
                 if (!penpalChild) {
-                    console.warn(
-                        `${PENPAL_PARENT_CHANNEL} (${frame.id}) - Failed to setup penpal connection: iframeRemote is null`,
-                    );
                     return Object.assign(iframe, syncMethods, remoteMethods) as IFrameView;
                 }
 

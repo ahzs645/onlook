@@ -8,23 +8,30 @@ import { type FrameData } from '@/components/store/editor/frames';
 
 export function ThemeGroup({ frameData }: { frameData: FrameData }) {
     const [theme, setTheme] = useState<SystemTheme>(SystemTheme.SYSTEM);
+
     useEffect(() => {
         const getTheme = async () => {
-            if (!frameData?.view) {
-                console.error('No frame view found');
+            if (typeof frameData?.view?.getTheme !== 'function') {
                 return;
             }
 
             const theme = await frameData.view.getTheme();
-            setTheme(theme);
-        }
+            if (theme) {
+                setTheme(theme);
+            }
+        };
+
         void getTheme();
     }, [frameData]);
 
     async function changeTheme(newTheme: SystemTheme) {
+        if (typeof frameData.view?.setTheme !== 'function') {
+            return;
+        }
+
         const previousTheme = theme;
         setTheme(newTheme);
-        const success = await frameData.view?.setTheme(newTheme);
+        const success = await frameData.view.setTheme(newTheme);
         if (!success) {
             toast.error('Failed to change theme');
             setTheme(previousTheme);

@@ -244,10 +244,16 @@ export class CodeFileSystem extends FileSystem {
             await this.createDirectory(ONLOOK_CACHE_DIRECTORY);
         } catch {
             console.warn(`[CodeEditorApi] Failed to create ${ONLOOK_CACHE_DIRECTORY} directory`);
+            return;
         }
+
         const index = getIndexFromCache(this.getCacheKey());
         if (index) {
-            await super.writeFile(this.indexPath, JSON.stringify(index));
+            try {
+                await super.writeFile(this.indexPath, JSON.stringify(index));
+            } catch (error) {
+                console.warn(`[CodeEditorApi] Failed to write ${this.indexPath}: ${error}`);
+            }
         }
     }
 
@@ -262,6 +268,7 @@ export class CodeFileSystem extends FileSystem {
     }
 
     async cleanup(): Promise<void> {
+        this.debouncedSaveIndexToFile.cancel();
         const cacheKey = this.getCacheKey();
         if (getIndexFromCache(cacheKey)) {
             await this.undobounceSaveIndexToFile();

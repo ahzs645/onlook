@@ -3,7 +3,7 @@
 import { type CodeDiff, type FontUploadFile } from '@onlook/models';
 import type { Font } from '@onlook/models/assets';
 import { generate } from '@onlook/parser';
-import { makeAutoObservable } from 'mobx';
+import { makeAutoObservable, runInAction } from 'mobx';
 import type { EditorEngine } from '../engine';
 import { addFontToConfig, ensureFontConfigFileExists, getFontConfigPath, readFontConfigFile, removeFontFromConfig, scanExistingFonts, scanFontConfig } from './font-config';
 import { FontSearchManager } from './font-search-manager';
@@ -44,7 +44,9 @@ export class FontManager {
     }
 
     async scanFonts(): Promise<Font[]> {
-        this._isScanning = true;
+        runInAction(() => {
+            this._isScanning = true;
+        });
         try {
             // Scan existing fonts and move them to config
             const existedFonts = await this.scanExistingFonts();
@@ -59,7 +61,9 @@ export class FontManager {
             }
             // Scan fonts from config file
             const fonts = await scanFontConfig(fontConfigPath, this.editorEngine);
-            this._fonts = fonts;
+            runInAction(() => {
+                this._fonts = fonts;
+            });
 
             // Update font search manager with current fonts
             this.fontSearchManager.updateFontsList(this._fonts);
@@ -69,7 +73,9 @@ export class FontManager {
             console.error('Error scanning fonts:', error);
             return [];
         } finally {
-            this._isScanning = false;
+            runInAction(() => {
+                this._isScanning = false;
+            });
         }
     }
 
@@ -104,7 +110,9 @@ export class FontManager {
             const success = await addFontToConfig(font, fontConfigPath, this.editorEngine);
             if (success) {
                 // Update the fonts array
-                this._fonts.push(font);
+                runInAction(() => {
+                    this._fonts.push(font);
+                });
 
                 // Update font search manager with current fonts
                 this.fontSearchManager.updateFontsList(this._fonts);
@@ -138,14 +146,16 @@ export class FontManager {
 
             if (result) {
                 // Remove from fonts array
-                this._fonts = this._fonts.filter((f) => f.id !== font.id);
+                runInAction(() => {
+                    this._fonts = this._fonts.filter((f) => f.id !== font.id);
+
+                    if (font.id === this._defaultFont) {
+                        this._defaultFont = null;
+                    }
+                });
 
                 // Update font search manager
                 this.fontSearchManager.updateFontsList(this._fonts);
-
-                if (font.id === this._defaultFont) {
-                    this._defaultFont = null;
-                }
 
                 // Remove font variable and font class from layout file
                 await removeFontVariableFromRootLayout(font.id, this.editorEngine);
@@ -164,7 +174,9 @@ export class FontManager {
 
     async setDefaultFont(font: Font): Promise<boolean> {
         try {
-            this._defaultFont = font.id;
+            runInAction(() => {
+                this._defaultFont = font.id;
+            });
             const codeDiff = await updateDefaultFontInRootLayout(font, this.editorEngine);
 
             if (!codeDiff) {
@@ -192,7 +204,9 @@ export class FontManager {
             const success = await clearDefaultFontFromRootLayout(currentDefaultFontId, this.editorEngine);
 
             if (success) {
-                this._defaultFont = null;
+                runInAction(() => {
+                    this._defaultFont = null;
+                });
 
                 // Reload all views after a delay
                 setTimeout(async () => {
@@ -210,7 +224,9 @@ export class FontManager {
     }
 
     async uploadFonts(fontFiles: FontUploadFile[]): Promise<boolean> {
-        this._isUploading = true;
+        runInAction(() => {
+            this._isUploading = true;
+        });
         try {
             const routerConfig = await this.editorEngine.activeSandbox.getRouterConfig();
             if (!routerConfig?.basePath) {
@@ -254,7 +270,9 @@ export class FontManager {
             console.error('Error uploading fonts:', error);
             return false;
         } finally {
-            this._isUploading = false;
+            runInAction(() => {
+                this._isUploading = false;
+            });
         }
     }
 
@@ -318,7 +336,9 @@ export class FontManager {
         try {
             const defaultFont = await getCurrentDefaultFont(this.editorEngine);
             if (defaultFont) {
-                this._defaultFont = defaultFont;
+                runInAction(() => {
+                    this._defaultFont = defaultFont;
+                });
             }
             return defaultFont;
         } catch (error) {
@@ -359,12 +379,15 @@ export class FontManager {
             }
 
             if (removedFonts.length > 0 || addedFonts.length > 0) {
-                this._fonts = currentFonts;
-                // Update font search manager with current fonts
+                runInAction(() => {
+                    this._fonts = currentFonts;
+                });
                 this.fontSearchManager.updateFontsList(this._fonts);
             }
 
-            this.previousFonts = currentFonts;
+            runInAction(() => {
+                this.previousFonts = currentFonts;
+            });
         } catch (error) {
             console.error('Error syncing fonts:', error);
         }

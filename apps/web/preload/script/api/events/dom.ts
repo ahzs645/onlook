@@ -2,6 +2,10 @@ import { EditorAttributes } from '@onlook/constants';
 import { penpalParent } from '../..';
 import { buildLayerTree } from '../dom';
 
+function isDestroyedConnectionError(error: unknown): boolean {
+    return error instanceof Error && error.message.toLowerCase().includes('destroyed connection');
+}
+
 export function listenForDomMutation() {
     const targetNode = document.body;
     const config = { childList: true, subtree: true };
@@ -56,6 +60,9 @@ export function listenForDomMutation() {
                     added: Object.fromEntries(added),
                     removed: Object.fromEntries(removed)
                 }).catch((error: Error) => {
+                    if (isDestroyedConnectionError(error)) {
+                        return;
+                    }
                     console.error('Failed to send window mutation event:', error);
                 });
             }
@@ -69,6 +76,9 @@ export function listenForResize() {
     function notifyResize() {
         if (penpalParent) {
             penpalParent.onWindowResized().catch((error: Error) => {
+                if (isDestroyedConnectionError(error)) {
+                    return;
+                }
                 console.error('Failed to send window resize event:', error);
             });
         }
