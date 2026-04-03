@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 const args = process.argv.slice(2);
 const command = args[0];
 
@@ -6,13 +8,18 @@ if (!command) {
 }
 
 const commandArgs = args.slice(1);
+const warningFilterPath = fileURLToPath(new URL('./suppress-dev-warnings.cjs', import.meta.url));
+const spawnArgs =
+    command === 'bun' && !commandArgs.includes('--preload')
+        ? ['--preload', warningFilterPath, ...commandArgs]
+        : commandArgs;
 
 const port = process.env.PORT ?? '4100';
 const hostname = process.env.HOSTNAME ?? 'localhost';
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? `http://${hostname}:${port}`;
 const desktopUrl = process.env.ONLOOK_DESKTOP_WEB_URL ?? `${siteUrl}/desktop`;
 
-const child = Bun.spawn([command, ...commandArgs], {
+const child = Bun.spawn([command, ...spawnArgs], {
     stdin: 'inherit',
     stdout: 'inherit',
     stderr: 'inherit',
