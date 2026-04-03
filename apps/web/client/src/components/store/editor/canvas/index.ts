@@ -1,4 +1,5 @@
 import { api } from '@/trpc/client';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { DefaultSettings } from '@onlook/constants';
 import { DefaultDesktopFrame } from '@onlook/db';
 import type { Canvas, RectPosition } from '@onlook/models';
@@ -64,6 +65,9 @@ export class CanvasManager {
     saveCanvas = debounce(this.undebouncedSaveCanvas, 5000);
 
     private async undebouncedSaveCanvas() {
+        if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
+            return;
+        }
         const success = await api.userCanvas.update.mutate({
             projectId: this.editorEngine.projectId,
             canvasId: this.id,

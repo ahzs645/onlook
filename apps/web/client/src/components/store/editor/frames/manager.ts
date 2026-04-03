@@ -1,5 +1,6 @@
 import type { IFrameView } from '@/app/project/[id]/_components/canvas/frame/view';
 import { api } from '@/trpc/client';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { toDbFrame, toDbPartialFrame } from '@onlook/db';
 import { type Frame } from '@onlook/models';
 import { calculateNonOverlappingPosition } from '@onlook/utility';
@@ -196,6 +197,11 @@ export class FramesManager {
             return;
         }
 
+        if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
+            this.disposeFrame(frameData.frame.id);
+            return;
+        }
+
         const success = await api.frame.delete.mutate({
             frameId: frameData.frame.id,
         });
@@ -208,6 +214,11 @@ export class FramesManager {
     }
 
     async create(frame: Frame) {
+        if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
+            this._frameIdToData.set(frame.id, { frame, view: null, selected: false });
+            return;
+        }
+
         const success = await api.frame.create.mutate(
             toDbFrame(roundDimensions(frame)),
         );
@@ -263,6 +274,9 @@ export class FramesManager {
     saveToStorage = debounce(this.undebouncedSaveToStorage.bind(this), 1000);
 
     async undebouncedSaveToStorage(frameId: string, frame: Partial<Frame>) {
+        if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
+            return;
+        }
         try {
             const frameToUpdate = toDbPartialFrame(frame);
             const success = await api.frame.update.mutate({

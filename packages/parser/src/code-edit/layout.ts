@@ -4,9 +4,6 @@ import type { T } from '../packages';
 import { t, traverse } from '../packages';
 
 export const injectPreloadScript = (ast: T.File): T.File => {
-    const hasScriptImport = isScriptImported(ast);
-    if (!hasScriptImport) addScriptImport(ast);
-
     const { scriptCount, deprecatedScriptCount, injectedCorrectly } = scanForPreloadScript(ast);
 
     if (scriptCount === 1 && deprecatedScriptCount === 0 && injectedCorrectly) {
@@ -73,54 +70,18 @@ function normalizeSelfClosingTag(node: T.JSXElement): void {
     }
 }
 
-function isScriptImported(ast: T.File): boolean {
-    let found = false;
-    traverse(ast, {
-        ImportDeclaration(path) {
-            if (
-                t.isStringLiteral(path.node.source, { value: 'next/script' }) &&
-                path.node.specifiers.some(
-                    (s) =>
-                        t.isImportDefaultSpecifier(s) &&
-                        t.isIdentifier(s.local, { name: 'Script' }),
-                )
-            ) {
-                found = true;
-                path.stop();
-            }
-        },
-    });
-    return found;
-}
-
-function addScriptImport(ast: T.File): void {
-    const scriptImport = t.importDeclaration(
-        [t.importDefaultSpecifier(t.identifier('Script'))],
-        t.stringLiteral('next/script'),
-    );
-
-    let insertIndex = 0;
-    for (let i = 0; i < ast.program.body.length; i++) {
-        if (t.isImportDeclaration(ast.program.body[i])) insertIndex = i + 1;
-        else break;
-    }
-
-    ast.program.body.splice(insertIndex, 0, scriptImport);
-}
-
 function getPreloadScript(): T.JSXElement {
     return t.jsxElement(
         t.jsxOpeningElement(
-            t.jsxIdentifier('Script'),
+            t.jsxIdentifier('script'),
             [
                 t.jsxAttribute(t.jsxIdentifier('src'), t.stringLiteral(ONLOOK_PRELOAD_SCRIPT_SRC)),
-                t.jsxAttribute(t.jsxIdentifier('strategy'), t.stringLiteral('afterInteractive')),
                 t.jsxAttribute(t.jsxIdentifier('type'), t.stringLiteral('module')),
                 t.jsxAttribute(t.jsxIdentifier('id'), t.stringLiteral('onlook-preload-script')),
             ],
             false,
         ),
-        t.jsxClosingElement(t.jsxIdentifier('Script')),
+        t.jsxClosingElement(t.jsxIdentifier('script')),
         [],
         false,
     );
@@ -130,7 +91,7 @@ function addScriptToJSXElement(node: T.JSXElement): void {
     const alreadyInjected = node.children.some(
         (child) =>
             t.isJSXElement(child) &&
-            t.isJSXIdentifier(child.openingElement.name, { name: 'Script' }) &&
+            isPreloadScriptElement(child) &&
             child.openingElement.attributes.some(
                 (attr) =>
                     t.isJSXAttribute(attr) &&
@@ -229,11 +190,17 @@ function wrapWithHtmlAndBody(ast: T.File): void {
     });
 }
 
+function isPreloadScriptElement(node: T.JSXElement): boolean {
+    return (
+        t.isJSXIdentifier(node.openingElement.name, { name: 'Script' }) ||
+        t.isJSXIdentifier(node.openingElement.name, { name: 'script' })
+    );
+}
+
 export function removeDeprecatedPreloadScripts(ast: T.File): void {
     traverse(ast, {
         JSXElement(path) {
-            const isScript = t.isJSXIdentifier(path.node.openingElement.name, { name: 'Script' });
-            if (!isScript) return;
+            if (!isPreloadScriptElement(path.node)) return;
 
             const srcAttr = path.node.openingElement.attributes.find(
                 (attr) =>
@@ -246,7 +213,10 @@ export function removeDeprecatedPreloadScripts(ast: T.File): void {
             if (
                 src &&
                 t.isStringLiteral(src) &&
-                DEPRECATED_PRELOAD_SCRIPT_SRCS.some((deprecatedSrc) => src.value === deprecatedSrc)
+                (
+                    src.value === ONLOOK_PRELOAD_SCRIPT_SRC ||
+                    DEPRECATED_PRELOAD_SCRIPT_SRCS.some((deprecatedSrc) => src.value === deprecatedSrc)
+                )
             ) {
                 console.log('removing deprecated script', src.value);
                 path.remove();
@@ -266,8 +236,7 @@ export function scanForPreloadScript(ast: T.File): {
 
     traverse(ast, {
         JSXElement(path) {
-            const isScript = t.isJSXIdentifier(path.node.openingElement.name, { name: 'Script' });
-            if (!isScript) return;
+            if (!isPreloadScriptElement(path.node)) return;
 
             const srcAttr = path.node.openingElement.attributes.find(
                 (attr) =>
@@ -290,7 +259,10 @@ export function scanForPreloadScript(ast: T.File): {
                 });
 
                 if (parentBodyPath) {
-                    injectedCorrectly = true;
+                    injectedCorrectly = t.isJSXIdentifier(
+                        path.node.openingElement.name,
+                        { name: 'script' },
+                    );
                 }
             } else if (
                 DEPRECATED_PRELOAD_SCRIPT_SRCS.some((deprecatedSrc) => src.value === deprecatedSrc)

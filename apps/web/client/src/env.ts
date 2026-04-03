@@ -8,7 +8,7 @@ export const env = createEnv({
      */
     server: {
         NODE_ENV: z.enum(['development', 'test', 'production']),
-        CSB_API_KEY: z.string(),
+        CSB_API_KEY: z.string().optional(),
         SANDBOX_PROVIDER: z
             .enum(['code_sandbox', 'e2b', 'daytona', 'vercel_sandbox', 'modal', 'node_fs'])
             .default('code_sandbox'),

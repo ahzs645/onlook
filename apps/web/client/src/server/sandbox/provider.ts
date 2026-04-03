@@ -3,9 +3,19 @@ import { CodeProvider, createCodeProviderClient, getStaticCodeProvider } from '@
 import { getSandboxPreviewUrl, SandboxTemplates, Templates } from '@onlook/constants';
 
 export function getConfiguredSandboxProvider(): CodeProvider {
+    if (env.SANDBOX_PROVIDER === CodeProvider.NodeFs) {
+        throw new Error('SANDBOX_PROVIDER=node_fs is only supported in the desktop-local renderer path');
+    }
+
     return env.SANDBOX_PROVIDER === CodeProvider.E2B
         ? CodeProvider.E2B
         : CodeProvider.CodeSandbox;
+}
+
+function assertCodeSandboxConfigured() {
+    if (!env.CSB_API_KEY) {
+        throw new Error('CSB_API_KEY is required when SANDBOX_PROVIDER=code_sandbox');
+    }
 }
 
 export function getConfiguredSandboxTemplate(template: Templates) {
@@ -48,7 +58,9 @@ export async function createConfiguredSandboxProviderClient(params: {
     sandboxId: string;
     userId?: string;
 }) {
-    if (getConfiguredSandboxProvider() === CodeProvider.E2B) {
+    const sandboxProvider = getConfiguredSandboxProvider();
+
+    if (sandboxProvider === CodeProvider.E2B) {
         return createCodeProviderClient(CodeProvider.E2B, {
             providerOptions: {
                 e2b: {
@@ -61,6 +73,7 @@ export async function createConfiguredSandboxProviderClient(params: {
         });
     }
 
+    assertCodeSandboxConfigured();
     return createCodeProviderClient(CodeProvider.CodeSandbox, {
         providerOptions: {
             codesandbox: {
@@ -72,5 +85,9 @@ export async function createConfiguredSandboxProviderClient(params: {
 }
 
 export async function getConfiguredSandboxStaticProvider() {
-    return getStaticCodeProvider(getConfiguredSandboxProvider());
+    const sandboxProvider = getConfiguredSandboxProvider();
+    if (sandboxProvider === CodeProvider.CodeSandbox) {
+        assertCodeSandboxConfigured();
+    }
+    return getStaticCodeProvider(sandboxProvider);
 }

@@ -1,5 +1,6 @@
 import { useEditorEngine } from '@/components/store/editor';
 import { api } from '@/trpc/react';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { EditorMode } from '@onlook/models';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useRef, useState } from 'react';
@@ -9,7 +10,10 @@ import { DEFAULT_INPUT_STATE } from './helpers';
 
 export const OverlayButtons = observer(() => {
     const editorEngine = useEditorEngine();
-    const { data: settings } = api.user.settings.get.useQuery();
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
+    const { data: settings } = api.user.settings.get.useQuery(undefined, {
+        enabled: !isDesktopLocal,
+    });
     const [inputState, setInputState] = useState(DEFAULT_INPUT_STATE);
     const prevChatPositionRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -21,6 +25,7 @@ export const OverlayButtons = observer(() => {
         !selectedRect ||
         isPreviewMode ||
         editorEngine.chat.isStreaming ||
+        isDesktopLocal ||
         !settings?.chat?.showMiniChat;
 
     useEffect(() => {

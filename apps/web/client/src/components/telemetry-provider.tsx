@@ -17,7 +17,12 @@ import { useEffect } from "react";
 let gleapSingleton: any | null = null;
 
 export function TelemetryProvider({ children }: { children: React.ReactNode }) {
-    const { data: user } = api.user.get.useQuery();
+    const hasWindow = typeof window !== "undefined";
+    const isDesktop = hasWindow && Boolean((window as any).onlookDesktop?.isDesktop);
+    const hasTelemetryKeys = Boolean(env.NEXT_PUBLIC_POSTHOG_KEY || env.NEXT_PUBLIC_GLEAP_API_KEY);
+    const { data: user } = api.user.get.useQuery(undefined, {
+        enabled: hasWindow && !isDesktop && hasTelemetryKeys,
+    });
     const pathname = usePathname();
 
     // Initialize SDKs once

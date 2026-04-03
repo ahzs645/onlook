@@ -1,13 +1,7 @@
-import { api } from '@/trpc/client';
-import {
-    CodeProvider,
-    createCodeProviderClient,
-    type E2BSession,
-    type Provider,
-} from '@onlook/code-provider';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
+import type { Provider } from '@onlook/code-provider/browser';
 import type { Branch } from '@onlook/models';
 import { makeAutoObservable } from 'mobx';
-import { getConfiguredClientSandboxProvider } from '@/utils/sandbox-provider';
 import type { ErrorManager } from '../error';
 import { CLISessionImpl, CLISessionType, type CLISession, type TerminalSession } from './terminal';
 
@@ -16,12 +10,21 @@ export class SessionManager {
     isConnecting = false;
     terminalSessions = new Map<string, CLISession>();
     activeTerminalSessionId = 'cli';
+    private readonly isDesktopLocalProject: boolean;
 
-    constructor(
-        private readonly branch: Branch,
-        private readonly errorManager: ErrorManager
-    ) {
+    constructor(branch: Branch, private readonly errorManager: ErrorManager) {
+        this.isDesktopLocalProject = isDesktopLocalProjectId(branch.projectId);
         makeAutoObservable(this);
+    }
+
+    private async createProvider(sandboxId: string, userId?: string): Promise<Provider> {
+        if (this.isDesktopLocalProject) {
+            const { createDesktopSessionProvider } = await import('./session-provider-desktop');
+            return createDesktopSessionProvider(sandboxId);
+        }
+
+        const { createHostedSessionProvider } = await import('./session-provider-hosted');
+        return createHostedSessionProvider(sandboxId, userId);
     }
 
     async start(sandboxId: string, userId?: string): Promise<void> {
@@ -35,36 +38,7 @@ export class SessionManager {
         this.isConnecting = true;
 
         const attemptConnection = async () => {
-            const sandboxProvider = getConfiguredClientSandboxProvider();
-            const provider =
-                sandboxProvider === CodeProvider.E2B
-                    ? await createCodeProviderClient(CodeProvider.E2B, {
-                          providerOptions: {
-                              e2b: {
-                                  sandboxId,
-                                  userId,
-                                  initClient: true,
-                                  getSession: async (targetSandboxId) => {
-                                      return api.sandbox.start.mutate({
-                                          sandboxId: targetSandboxId,
-                                      }) as Promise<E2BSession>;
-                                  },
-                              },
-                          },
-                      })
-                    : await createCodeProviderClient(CodeProvider.CodeSandbox, {
-                          providerOptions: {
-                              codesandbox: {
-                                  sandboxId,
-                                  userId,
-                                  initClient: true,
-                                  getSession: async (targetSandboxId) => {
-                                      return api.sandbox.start.mutate({ sandboxId: targetSandboxId });
-                                  },
-                              },
-                          },
-                      });
-
+            const provider = await this.createProvider(sandboxId, userId);
             this.provider = provider;
             await this.createTerminalSessions(provider);
         };
@@ -142,10 +116,7 @@ export class SessionManager {
 
         // Initialize the sessions after creation
         try {
-            await Promise.all([
-                task.initTask(),
-                terminal.initTerminal()
-            ]);
+            await Promise.all([task.initTask(), terminal.initTerminal()]);
         } catch (error) {
             console.error('Failed to initialize terminal sessions:', error);
         }
@@ -165,7 +136,11 @@ export class SessionManager {
     }
 
     async hibernate(sandboxId: string) {
-        await api.sandbox.hibernate.mutate({ sandboxId });
+        if (this.isDesktopLocalProject) {
+            return;
+        }
+        const { hibernateHostedSession } = await import('./session-provider-hosted');
+        await hibernateHostedSession(sandboxId);
     }
 
     async reconnect(sandboxId: string, userId?: string) {
@@ -207,8 +182,7 @@ export class SessionManager {
     async ping() {
         if (!this.provider) return false;
         try {
-            await this.provider.runCommand({ args: { command: 'echo "ping"' } });
-            return true;
+            return await this.provider.ping();
         } catch (error) {
             console.error('Failed to connect to sandbox', error);
             return false;

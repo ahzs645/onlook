@@ -1,4 +1,5 @@
 import { CodeProviderSync } from '@/services/sync-engine/sync-engine';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import type { Provider } from '@onlook/code-provider';
 import { EXCLUDED_SYNC_PATHS } from '@onlook/constants';
 import type { CodeFileSystem } from '@onlook/file-system';
@@ -126,6 +127,14 @@ export class SandboxManager {
 
     get errors() {
         return this.errorManager.errors;
+    }
+
+    get projectId() {
+        return this.branch.projectId;
+    }
+
+    get isDesktopLocalProject() {
+        return isDesktopLocalProjectId(this.branch.projectId);
     }
 
     get syncEngine() {

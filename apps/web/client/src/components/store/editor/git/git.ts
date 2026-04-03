@@ -33,6 +33,10 @@ export class GitManager {
     async init(): Promise<void> {
         const isInitialized = await this.isRepoInitialized();
         if (!isInitialized) {
+            if (this.sandbox.isDesktopLocalProject) {
+                this.commits = [];
+                return;
+            }
             await this.initRepo();
         }
         await this.listCommits();

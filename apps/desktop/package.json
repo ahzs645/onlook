@@ -1,0 +1,31 @@
+{
+    "name": "@onlook/desktop",
+    "private": true,
+    "type": "module",
+    "main": "dist/main.js",
+    "scripts": {
+        "dev": "concurrently -k -n WEB,BUILD,ELECTRON -c blue,green,magenta \"bun run dev:web\" \"bun run build:watch\" \"bun run dev:electron\"",
+        "dev:web": "bun run src/with-desktop-env.ts bun --filter @onlook/web-client dev",
+        "dev:electron": "wait-on tcp:127.0.0.1:4100 file:dist/main.js file:dist/preload.cjs && bun run src/with-desktop-env.ts electron dist/main.js",
+        "start": "bun run dev",
+        "build": "bun run build:main && bun run build:preload",
+        "build:main": "bun build src/main.ts --outfile dist/main.js --target=node --external electron",
+        "build:preload": "bun build src/preload.ts --outfile dist/preload.cjs --target=node --format=cjs --external electron",
+        "build:watch": "concurrently -k -n MAIN,PRELOAD -c green,yellow \"bun run build:watch:main\" \"bun run build:watch:preload\"",
+        "build:watch:main": "bun build src/main.ts --outfile dist/main.js --target=node --external electron --watch",
+        "build:watch:preload": "bun build src/preload.ts --outfile dist/preload.cjs --target=node --format=cjs --external electron --watch",
+        "lint": "eslint . --max-warnings 0",
+        "format": "eslint --fix .",
+        "typecheck": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "@onlook/eslint": "*",
+        "@onlook/typescript": "*",
+        "@types/bun": "latest",
+        "concurrently": "^9.2.1",
+        "electron": "^40.0.0",
+        "eslint": "^9.0.0",
+        "typescript": "^5.5.4",
+        "wait-on": "^8.0.5"
+    }
+}

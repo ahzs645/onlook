@@ -1,5 +1,6 @@
 import { useEditorEngine } from '@/components/store/editor';
 import { transKeys } from '@/i18n/keys';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { LeftPanelTabValue } from '@onlook/models';
 import { Icons } from '@onlook/ui/icons';
 import { cn } from '@onlook/ui/utils';
@@ -52,6 +53,10 @@ export const DesignPanel = observer(() => {
     const t = useTranslations();
     const isLocked = editorEngine.state.leftPanelLocked;
     const selectedTab = editorEngine.state.leftPanelTab;
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
+    const availableTabs = isDesktopLocal
+        ? tabs.filter((tab) => tab.value !== LeftPanelTabValue.BRANCHES)
+        : tabs;
 
     const handleMouseEnter = (tab: LeftPanelTabValue) => {
         if (isLocked) {
@@ -103,8 +108,8 @@ export const DesignPanel = observer(() => {
             onMouseLeave={handleMouseLeave}
         >
             {/* Left sidebar with tabs */}
-            <div className="w-20 flex flex-col items-center py-0.5 gap-2 bg-background-onlook/60 backdrop-blur-xl">
-                {tabs.map((tab) => (
+                <div className="w-20 flex flex-col items-center py-0.5 gap-2 bg-background-onlook/60 backdrop-blur-xl">
+                {availableTabs.map((tab) => (
                     <button
                         key={tab.value}
                         className={cn(
@@ -130,7 +135,8 @@ export const DesignPanel = observer(() => {
             </div>
 
             {/* Content panel */}
-            {editorEngine.state.leftPanelTab && (
+            {editorEngine.state.leftPanelTab &&
+                (!isDesktopLocal || selectedTab !== LeftPanelTabValue.BRANCHES) && (
                 <>
                     <div className="flex-1 w-[280px] bg-background/95 rounded-xl">
                         <div className="border backdrop-blur-xl h-full shadow overflow-auto p-0 rounded-xl">
