@@ -371,6 +371,8 @@ export class FileSystem {
 
         const watchers: any[] = [];
         const watchedPaths = new Set<string>();
+        const isOnlookCachePath = (filePath: string) =>
+            filePath === '.onlook' || filePath.startsWith('.onlook/');
 
         const setupWatcher = (dirPath: string) => {
             if (watchedPaths.has(dirPath)) return;
@@ -406,7 +408,9 @@ export class FileSystem {
                                 });
                             } else {
                                 // New path, it's a create
-                                console.log(`[FileSystem] Detected create for ${filePath}`);
+                                if (!isOnlookCachePath(filePath)) {
+                                    console.log(`[FileSystem] Detected create for ${filePath}`);
+                                }
                                 callback({
                                     type: 'create',
                                     path: filePath,
@@ -419,7 +423,9 @@ export class FileSystem {
                             }
                         } catch (error) {
                             // File doesn't exist, it was deleted
-                            console.log(`[FileSystem] Detected delete for ${filePath}`);
+                            if (!isOnlookCachePath(filePath)) {
+                                console.log(`[FileSystem] Detected delete for ${filePath}`);
+                            }
                             callback({
                                 type: 'delete',
                                 path: filePath,

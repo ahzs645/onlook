@@ -243,7 +243,6 @@ export class CodeFileSystem extends FileSystem {
         try {
             await this.createDirectory(ONLOOK_CACHE_DIRECTORY);
         } catch {
-            console.warn(`[CodeEditorApi] Failed to create ${ONLOOK_CACHE_DIRECTORY} directory`);
             return;
         }
 

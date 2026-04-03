@@ -21,6 +21,9 @@ const child = Bun.spawn([command, ...commandArgs], {
         PORT: port,
         HOSTNAME: hostname,
         SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? '1',
+        BROWSERSLIST_IGNORE_OLD_DATA: process.env.BROWSERSLIST_IGNORE_OLD_DATA ?? '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS:
+            process.env.ELECTRON_DISABLE_SECURITY_WARNINGS ?? 'true',
         ONLOOK_DESKTOP_MODE: 'true',
         ONLOOK_DESKTOP_WEB_URL: desktopUrl,
         SANDBOX_PROVIDER: process.env.SANDBOX_PROVIDER ?? 'node_fs',

@@ -77,13 +77,26 @@ export class BranchManager {
         );
     }
 
+    private getResolvedBranchId(): string | null {
+        if (this.currentBranchId && this.branchMap.has(this.currentBranchId)) {
+            return this.currentBranchId;
+        }
+
+        const branches = Array.from(this.branchMap.values()).map(({ branch }) => branch);
+
+        return branches.find((branch) => branch.isDefault)?.id ?? branches[0]?.id ?? null;
+    }
+
     get activeBranchData(): BranchData {
-        if (!this.currentBranchId) {
+        const branchId = this.getResolvedBranchId();
+
+        if (!branchId) {
             throw new Error('No branch selected. This should not happen after proper initialization.');
         }
-        const branchData = this.branchMap.get(this.currentBranchId);
+
+        const branchData = this.branchMap.get(branchId);
         if (!branchData) {
-            throw new Error(`Branch not found for branch ${this.currentBranchId}. This should not happen after proper initialization.`);
+            throw new Error(`Branch not found for branch ${branchId}. This should not happen after proper initialization.`);
         }
         return branchData;
     }

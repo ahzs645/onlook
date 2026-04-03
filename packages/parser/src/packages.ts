@@ -1,12 +1,9 @@
-import { packages } from '@babel/standalone';
-
-import type { GeneratorOptions } from '@babel/generator';
-import type { NodePath } from '@babel/traverse';
+import { parse } from '@babel/parser';
+import generate, { type GeneratorOptions } from '@babel/generator';
+import traverse, { type NodePath } from '@babel/traverse';
+import * as t from '@babel/types';
 import type * as T from '@babel/types';
 
-export const { parse } = packages.parser;
-export const { generate } = packages.generator;
-export const traverse = packages.traverse.default;
-export const t = packages.types;
+export { generate, parse, traverse, t };
 
 export type { T, NodePath, GeneratorOptions };

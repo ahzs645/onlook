@@ -630,7 +630,11 @@ export class CodeProviderSync {
             // Need to remove leading / for sandbox path
             const sandboxPath = path.startsWith('/') ? path.substring(1) : path;
             if (!this.shouldSync(sandboxPath)) {
-                console.debug(`[Sync] Skipping local ${type} for excluded path: ${path}`);
+                const isOnlookCachePath =
+                    sandboxPath === '.onlook' || sandboxPath.startsWith('.onlook/');
+                if (!isOnlookCachePath) {
+                    console.debug(`[Sync] Skipping local ${type} for excluded path: ${path}`);
+                }
                 return;
             }
 

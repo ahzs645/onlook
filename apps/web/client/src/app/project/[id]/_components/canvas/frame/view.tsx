@@ -224,7 +224,7 @@ export const FrameComponent = observer(
                 return async (...args: Parameters<T>) => {
                     try {
                         if (!method) throw new Error('Method not initialized');
-                        return method(...args);
+                        return await method(...args);
                     } catch (error) {
                         if (isDestroyedConnectionError(error)) {
                             return;
