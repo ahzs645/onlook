@@ -1,4 +1,13 @@
 import { api } from '@/trpc/client';
+import {
+    createDesktopLocalConversation,
+    deleteDesktopLocalConversation,
+    deriveDesktopLocalConversationTitle,
+    listDesktopLocalConversations,
+    updateDesktopLocalConversation,
+    upsertDesktopLocalConversation,
+} from '@/utils/desktop-local-chat';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { type ChatConversation } from '@onlook/models';
 import { makeAutoObservable } from 'mobx';
 import { toast } from 'sonner';
@@ -56,9 +65,14 @@ export class ConversationManager {
             if (this.current?.messageCount === 0 && !this.current?.title) {
                 throw new Error('Current conversation is already empty.');
             }
-            const newConversation = await api.chat.conversation.upsert.mutate({
-                projectId: this.editorEngine.projectId,
-            });
+            const newConversation = isDesktopLocalProjectId(this.editorEngine.projectId)
+                ? await upsertDesktopLocalConversation(
+                    this.editorEngine.projectId,
+                    createDesktopLocalConversation(this.editorEngine.projectId),
+                )
+                : await api.chat.conversation.upsert.mutate({
+                    projectId: this.editorEngine.projectId,
+                });
             this.current = {
                 ...newConversation,
                 messageCount: 0,
@@ -114,10 +128,12 @@ export class ConversationManager {
             console.error('No conversation found');
             return;
         }
-        const title = await api.chat.conversation.generateTitle.mutate({
-            conversationId: this.current?.id,
-            content,
-        });
+        const title = isDesktopLocalProjectId(this.editorEngine.projectId)
+            ? deriveDesktopLocalConversationTitle(content)
+            : await api.chat.conversation.generateTitle.mutate({
+                conversationId: this.current?.id,
+                content,
+            });
         if (!title) {
             console.error('Error generating conversation title. No title returned.');
             return;
@@ -135,13 +151,35 @@ export class ConversationManager {
                 title,
             };
         }
+        if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
+            await updateDesktopLocalConversation(this.editorEngine.projectId, this.current.id, {
+                title,
+                updatedAt: new Date(),
+            });
+        }
     }
 
     async getConversationsFromStorage(id: string): Promise<ChatConversation[] | null> {
+        if (isDesktopLocalProjectId(id)) {
+            return listDesktopLocalConversations(id);
+        }
         return api.chat.conversation.getAll.query({ projectId: id });
     }
 
     async upsertConversationInStorage(conversation: Partial<ChatConversation>): Promise<ChatConversation> {
+        if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
+            const nextConversation = createDesktopLocalConversation(this.editorEngine.projectId);
+            return upsertDesktopLocalConversation(
+                this.editorEngine.projectId,
+                {
+                    ...nextConversation,
+                    ...conversation,
+                    id: conversation.id ?? nextConversation.id,
+                    projectId: this.editorEngine.projectId,
+                    updatedAt: new Date(),
+                },
+            );
+        }
         return await api.chat.conversation.upsert.mutate({
             ...conversation,
             projectId: this.editorEngine.projectId,
@@ -149,10 +187,21 @@ export class ConversationManager {
     }
 
     async updateConversationInStorage(conversation: Partial<ChatConversation> & { id: string }) {
+        if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
+            await updateDesktopLocalConversation(this.editorEngine.projectId, conversation.id, {
+                ...conversation,
+                updatedAt: new Date(),
+            });
+            return;
+        }
         await api.chat.conversation.update.mutate(conversation);
     }
 
     async deleteConversationInStorage(id: string) {
+        if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
+            await deleteDesktopLocalConversation(this.editorEngine.projectId, id);
+            return;
+        }
         await api.chat.conversation.delete.mutate({ conversationId: id });
     }
 

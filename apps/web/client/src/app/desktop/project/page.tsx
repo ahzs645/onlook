@@ -17,9 +17,10 @@ import { BottomBar } from '@/app/project/[id]/_components/bottom-bar';
 import { Canvas } from '@/app/project/[id]/_components/canvas';
 import { EditorBar } from '@/app/project/[id]/_components/editor-bar';
 import { LeftPanel } from '@/app/project/[id]/_components/left-panel';
+import { RightPanel } from '@/app/project/[id]/_components/right-panel';
 import { ModeToggle } from '@/app/project/[id]/_components/top-bar/mode-toggle';
 import { usePanelMeasurements } from '@/app/project/[id]/_hooks/use-panel-measure';
-import type { Branch, Canvas as ProjectCanvas, Frame, Project } from '@onlook/models';
+import { EditorMode, type Branch, type Canvas as ProjectCanvas, type Frame, type Project } from '@onlook/models';
 
 import {
     createDesktopLocalProjectId,
@@ -203,6 +204,7 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
     const rightPanelRef = useRef<HTMLDivElement | null>(null);
     const initializedSessionRef = useRef<string | null>(null);
     const [isReady, setIsReady] = useState(false);
+    const [isChatReady, setIsChatReady] = useState(false);
     const { toolbarLeft, toolbarRight, editorBarAvailableWidth } = usePanelMeasurements(
         leftPanelRef,
         rightPanelRef,
@@ -224,6 +226,7 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
 
         initializedSessionRef.current = session.id;
         setIsReady(false);
+        setIsChatReady(false);
     }, [editorEngine, session]);
 
     useEffect(() => {
@@ -239,6 +242,40 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
             dispose();
         };
     }, [editorEngine]);
+
+    useEffect(() => {
+        if (!isReady) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const initializeChat = async () => {
+            try {
+                const conversations = await editorEngine.chat.conversation.getConversations(
+                    createDesktopLocalProjectId(session.id),
+                );
+                if (cancelled) {
+                    return;
+                }
+                await editorEngine.chat.conversation.applyConversations(conversations);
+                if (!cancelled) {
+                    setIsChatReady(true);
+                }
+            } catch (error) {
+                console.error('[desktop] Failed to initialize local chat:', error);
+                if (!cancelled) {
+                    setIsChatReady(true);
+                }
+            }
+        };
+
+        void initializeChat();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [editorEngine, isReady, session.id]);
 
     useEffect(() => {
         if (!isReady) {
@@ -322,11 +359,11 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
         };
     }, [editorEngine, isReady, session.id]);
 
-    if (!isReady) {
+    if (!isReady || !isChatReady) {
         return (
             <DesktopLoadingState
                 title="Preparing local editor"
-                body="Connecting the desktop file bridge, syncing project files, and waiting for the local preview to stabilize."
+                body="Connecting the desktop file bridge, restoring local chat history, and waiting for the local preview to stabilize."
             />
         );
     }
@@ -363,8 +400,13 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
 
                 <div
                     ref={rightPanelRef}
-                    className={cn('pointer-events-none absolute top-10 right-0 z-0 h-0 w-0')}
-                />
+                    className={cn(
+                        'absolute top-10 right-0 z-50 h-[calc(100%-40px)]',
+                        editorEngine.state.editorMode === EditorMode.PREVIEW && 'hidden',
+                    )}
+                >
+                    <RightPanel />
+                </div>
 
                 <BottomBar />
             </div>

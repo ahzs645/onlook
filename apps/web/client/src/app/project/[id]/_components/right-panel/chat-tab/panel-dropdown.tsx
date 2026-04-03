@@ -1,6 +1,7 @@
 import { useEditorEngine } from '@/components/store/editor';
 import { transKeys } from '@/i18n/keys';
 import { api } from '@/trpc/react';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import type { ChatSettings } from '@onlook/models';
 import {
     DropdownMenu,
@@ -26,14 +27,17 @@ export const ChatPanelDropdown = observer(({
     setIsChatHistoryOpen: (isOpen: boolean) => void;
 }) => {
     const t = useTranslations();
+    const editorEngine = useEditorEngine();
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
     const { mutate: updateSettings } = api.user.settings.upsert.useMutation({
         onSuccess: () => {
             void apiUtils.user.settings.get.invalidate();
         },
     });
-    const { data: userSettings } = api.user.settings.get.useQuery();
     const apiUtils = api.useUtils();
-    const editorEngine = useEditorEngine();
+    const { data: userSettings } = api.user.settings.get.useQuery(undefined, {
+        enabled: !isDesktopLocal,
+    });
 
     const debouncedUpdateSettings = useMemo(
         () => debounce((settings: Partial<ChatSettings>) => {
@@ -53,6 +57,10 @@ export const ChatPanelDropdown = observer(({
     const updateChatSettings = useCallback((e: React.MouseEvent, settings: Partial<ChatSettings>) => {
         e.preventDefault();
 
+        if (isDesktopLocal) {
+            return;
+        }
+
         apiUtils.user.settings.get.setData(undefined, (oldData) => {
             if (!oldData) return oldData;
             return {
@@ -65,7 +73,7 @@ export const ChatPanelDropdown = observer(({
         });
 
         debouncedUpdateSettings(settings);
-    }, [apiUtils.user.settings.get, debouncedUpdateSettings]);
+    }, [apiUtils.user.settings.get, debouncedUpdateSettings, isDesktopLocal]);
 
     return (
         <DropdownMenu modal={false}>
@@ -73,40 +81,44 @@ export const ChatPanelDropdown = observer(({
                 <div className="flex items-center">{children}</div>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="min-w-[220px]">
-                <DropdownMenuItem
-                    className="flex items-center py-1.5"
-                    onClick={(e) => {
-                        updateChatSettings(e, {
-                            showSuggestions: !userSettings?.chat.showSuggestions,
-                        });
-                    }}
-                >
-                    <Icons.Check
-                        className={cn(
-                            'mr-2 h-4 w-4',
-                            userSettings?.chat.showSuggestions ? 'opacity-100' : 'opacity-0',
-                        )}
-                    />
-                    {t(transKeys.editor.panels.edit.tabs.chat.settings.showSuggestions)}
-                </DropdownMenuItem>
+                {!isDesktopLocal && (
+                    <>
+                        <DropdownMenuItem
+                            className="flex items-center py-1.5"
+                            onClick={(e) => {
+                                updateChatSettings(e, {
+                                    showSuggestions: !userSettings?.chat.showSuggestions,
+                                });
+                            }}
+                        >
+                            <Icons.Check
+                                className={cn(
+                                    'mr-2 h-4 w-4',
+                                    userSettings?.chat.showSuggestions ? 'opacity-100' : 'opacity-0',
+                                )}
+                            />
+                            {t(transKeys.editor.panels.edit.tabs.chat.settings.showSuggestions)}
+                        </DropdownMenuItem>
 
-                <DropdownMenuItem
-                    className="flex items-center py-1.5"
-                    onClick={(e) => {
-                        updateChatSettings(e, {
-                            showMiniChat: !userSettings?.chat.showMiniChat,
-                        });
-                    }}
-                >
-                    <Icons.Check
-                        className={cn(
-                            'mr-2 h-4 w-4',
-                            userSettings?.chat.showMiniChat ? 'opacity-100' : 'opacity-0',
-                        )}
-                    />
-                    {t(transKeys.editor.panels.edit.tabs.chat.settings.showMiniChat)}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                            className="flex items-center py-1.5"
+                            onClick={(e) => {
+                                updateChatSettings(e, {
+                                    showMiniChat: !userSettings?.chat.showMiniChat,
+                                });
+                            }}
+                        >
+                            <Icons.Check
+                                className={cn(
+                                    'mr-2 h-4 w-4',
+                                    userSettings?.chat.showMiniChat ? 'opacity-100' : 'opacity-0',
+                                )}
+                            />
+                            {t(transKeys.editor.panels.edit.tabs.chat.settings.showMiniChat)}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                    </>
+                )}
                 <DropdownMenuItem onClick={() => setIsChatHistoryOpen(!isChatHistoryOpen)}>
                     <Icons.CounterClockwiseClock className="mr-2 h-4 w-4" />
                     {t(transKeys.editor.panels.edit.tabs.chat.controls.history)}

@@ -1,5 +1,7 @@
 import { type ChatMessage } from '@onlook/models';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { useChat } from '../../../../_hooks/use-chat';
+import { useDesktopLocalChat } from '../../../../_hooks/use-desktop-local-chat';
 import { ChatInput } from '../chat-input';
 import { ChatMessages } from '../chat-messages';
 import { ErrorSection } from '../error';
@@ -10,16 +12,21 @@ interface ChatTabContentProps {
     initialMessages: ChatMessage[];
 }
 
-export const ChatTabContent = ({
-    conversationId,
-    projectId,
-    initialMessages,
-}: ChatTabContentProps) => {
-    const { isStreaming, sendMessage, editMessage, messages, error, stop, queuedMessages, removeFromQueue } = useChat({
-        conversationId,
-        projectId,
-        initialMessages,
-    });
+function ChatTabBody({
+    chatState,
+}: {
+    chatState: ReturnType<typeof useChat>;
+}) {
+    const {
+        isStreaming,
+        sendMessage,
+        editMessage,
+        messages,
+        error,
+        stop,
+        queuedMessages,
+        removeFromQueue,
+    } = chatState;
 
     return (
         <div className="flex flex-col h-full justify-end gap-2 pt-2">
@@ -40,4 +47,40 @@ export const ChatTabContent = ({
             />
         </div>
     );
+}
+
+function HostedChatTabContent({
+    conversationId,
+    projectId,
+    initialMessages,
+}: ChatTabContentProps) {
+    const chatState = useChat({
+        conversationId,
+        projectId,
+        initialMessages,
+    });
+
+    return <ChatTabBody chatState={chatState} />;
+}
+
+function DesktopLocalChatTabContent({
+    conversationId,
+    projectId,
+    initialMessages,
+}: ChatTabContentProps) {
+    const chatState = useDesktopLocalChat({
+        conversationId,
+        projectId,
+        initialMessages,
+    });
+
+    return <ChatTabBody chatState={chatState} />;
+}
+
+export const ChatTabContent = (props: ChatTabContentProps) => {
+    if (isDesktopLocalProjectId(props.projectId)) {
+        return <DesktopLocalChatTabContent {...props} />;
+    }
+
+    return <HostedChatTabContent {...props} />;
 };

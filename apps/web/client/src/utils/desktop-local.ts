@@ -43,6 +43,12 @@ export function isDesktopLocalProjectId(projectId: string): boolean {
     return projectId.startsWith(DESKTOP_LOCAL_PROJECT_PREFIX);
 }
 
+export function parseDesktopLocalProjectId(projectId: string): string | null {
+    return isDesktopLocalProjectId(projectId)
+        ? projectId.slice(DESKTOP_LOCAL_PROJECT_PREFIX.length)
+        : null;
+}
+
 type DesktopProviderBridge = NodeFsDesktopProviderBridge;
 
 declare global {
