@@ -19,9 +19,22 @@ const DEFAULT_EXCLUDES = ['node_modules', '.git', '.next', 'dist', 'build', '.tu
 export async function hashContent(content: string | Uint8Array): Promise<string> {
     const encoder = new TextEncoder();
     const data = typeof content === 'string' ? encoder.encode(content) : new Uint8Array(content);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    const subtle = globalThis.crypto?.subtle;
+
+    if (subtle) {
+        const hashBuffer = await subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Fallback for insecure self-hosted HTTP origins where Web Crypto is unavailable.
+    // We only need a stable content fingerprint to avoid redundant sync writes.
+    let hash = 0x811c9dc5;
+    for (const byte of data) {
+        hash ^= byte;
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, '0');
 }
 
 interface SyncInstance {
