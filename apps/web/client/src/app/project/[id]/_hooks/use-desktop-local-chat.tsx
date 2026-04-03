@@ -3,9 +3,10 @@
 import { useEditorEngine } from '@/components/store/editor';
 import {
     getDesktopLocalConversation,
+    getDesktopLocalChatSelection,
     replaceDesktopLocalConversationMessages,
-    resolveDesktopLocalChatCli,
     setDesktopLocalConversationCliSession,
+    type DesktopLocalChatCli,
 } from '@/utils/desktop-local-chat';
 import {
     ChatType,
@@ -64,6 +65,18 @@ type ClaudeEvent =
         };
     };
 
+type CodexEvent = {
+    type?: string;
+    thread_id?: string;
+    item?: {
+        type?: string;
+        text?: string;
+        delta?: string | { text?: string };
+    };
+    error?: string | { message?: string };
+    message?: string;
+};
+
 function shellQuote(value: string) {
     return JSON.stringify(value);
 }
@@ -73,6 +86,43 @@ function getMessageText(parts: ChatMessage['parts']) {
         .filter((part) => part.type === 'text')
         .map((part) => part.text)
         .join('');
+}
+
+function extractCodexEventText(event: CodexEvent): string | null {
+    const item = event.item;
+    if (!item || item.type !== 'agent_message') {
+        return null;
+    }
+
+    if (typeof item.text === 'string') {
+        return item.text;
+    }
+
+    if (typeof item.delta === 'string') {
+        return item.delta;
+    }
+
+    if (item.delta && typeof item.delta === 'object' && typeof item.delta.text === 'string') {
+        return item.delta.text;
+    }
+
+    return null;
+}
+
+function getCodexErrorMessage(event: CodexEvent): string | null {
+    if (typeof event.message === 'string' && event.message.trim()) {
+        return event.message.trim();
+    }
+
+    if (typeof event.error === 'string' && event.error.trim()) {
+        return event.error.trim();
+    }
+
+    if (event.error && typeof event.error === 'object' && typeof event.error.message === 'string') {
+        return event.error.message.trim();
+    }
+
+    return null;
 }
 
 function buildDesktopLocalPrompt(input: {
@@ -174,6 +224,8 @@ export function useDesktopLocalChat({
         unsubscribe: () => void;
     } | null>(null);
     const activeAssistantMessageIdRef = useRef<string | null>(null);
+    const activeCliRef = useRef<DesktopLocalChatCli | null>(null);
+    const activeModelRef = useRef<string | null>(null);
 
     useEffect(() => {
         setMessages(initialMessages);
@@ -265,9 +317,22 @@ export function useDesktopLocalChat({
         outputBufferRef.current = '';
         rawOutputRef.current = '';
         activeAssistantMessageIdRef.current = null;
+        activeCliRef.current = null;
+        activeModelRef.current = null;
     }, []);
 
-    const processEvent = useCallback(
+    const finalizeCommand = useCallback(
+        (reason: string, nextError?: Error) => {
+            setError(nextError);
+            setFinishReason(reason);
+            setIsStreaming(false);
+            setStatus('ready');
+            clearActiveCommand();
+        },
+        [clearActiveCommand],
+    );
+
+    const processClaudeEvent = useCallback(
         (event: ClaudeEvent) => {
             switch (event.type) {
                 case 'system':
@@ -277,6 +342,7 @@ export function useDesktopLocalChat({
                             conversationId,
                             'claude',
                             event.session_id,
+                            activeModelRef.current,
                         );
                     }
                     return;
@@ -308,27 +374,75 @@ export function useDesktopLocalChat({
                             conversationId,
                             'claude',
                             event.session_id,
+                            activeModelRef.current,
                         );
                     }
 
                     if (event.is_error) {
                         const message = event.result?.trim() || rawOutputRef.current.trim();
-                        setError(new Error(message || 'Desktop local chat failed'));
-                        setFinishReason('error');
+                        finalizeCommand('error', new Error(message || 'Desktop local chat failed'));
                     } else {
                         if (event.result) {
                             upsertAssistantMessage(event.result, 'replace');
                         }
-                        setError(undefined);
-                        setFinishReason(event.stop_reason ?? 'end_turn');
+                        finalizeCommand(event.stop_reason ?? 'end_turn');
                     }
-                    setIsStreaming(false);
-                    setStatus('ready');
-                    clearActiveCommand();
                     return;
             }
         },
-        [clearActiveCommand, conversationId, projectId, upsertAssistantMessage],
+        [conversationId, finalizeCommand, projectId, upsertAssistantMessage],
+    );
+
+    const processCodexEvent = useCallback(
+        (event: CodexEvent) => {
+            switch (event.type) {
+                case 'thread.started':
+                    if (event.thread_id) {
+                        void setDesktopLocalConversationCliSession(
+                            projectId,
+                            conversationId,
+                            'codex',
+                            event.thread_id,
+                            activeModelRef.current,
+                        );
+                    }
+                    return;
+                case 'item.delta': {
+                    const text = extractCodexEventText(event);
+                    if (text) {
+                        upsertAssistantMessage(text, 'append');
+                    }
+                    return;
+                }
+                case 'item.completed': {
+                    const text = extractCodexEventText(event);
+                    if (text) {
+                        upsertAssistantMessage(text, 'replace');
+                    }
+                    return;
+                }
+                case 'error': {
+                    const message = getCodexErrorMessage(event) || rawOutputRef.current.trim();
+                    finalizeCommand('error', new Error(message || 'Desktop local chat failed'));
+                    return;
+                }
+                case 'turn.completed': {
+                    const lastAssistantMessage = messagesRef.current.findLast(
+                        (message) => message.role === 'assistant',
+                    );
+                    if (!lastAssistantMessage && rawOutputRef.current.trim()) {
+                        finalizeCommand(
+                            'error',
+                            new Error(rawOutputRef.current.trim() || 'Desktop local chat failed'),
+                        );
+                        return;
+                    }
+                    finalizeCommand('end_turn');
+                    return;
+                }
+            }
+        },
+        [conversationId, finalizeCommand, projectId, upsertAssistantMessage],
     );
 
     const processOutputChunk = useCallback(
@@ -352,13 +466,18 @@ export function useDesktopLocalChat({
                 }
 
                 try {
-                    processEvent(JSON.parse(line) as ClaudeEvent);
+                    const parsed = JSON.parse(line) as ClaudeEvent | CodexEvent;
+                    if (activeCliRef.current === 'codex') {
+                        processCodexEvent(parsed as CodexEvent);
+                    } else {
+                        processClaudeEvent(parsed as ClaudeEvent);
+                    }
                 } catch {
                     rawOutputRef.current += `${line}\n`;
                 }
             }
         },
-        [processEvent],
+        [processClaudeEvent, processCodexEvent],
     );
 
     const runCli = useCallback(
@@ -373,37 +492,49 @@ export function useDesktopLocalChat({
             type: ChatType;
             resetSession?: boolean;
         }) => {
-            const cli = await resolveDesktopLocalChatCli(projectId);
-            if (!cli) {
+            const selection = await getDesktopLocalChatSelection(projectId);
+            if (!selection) {
                 throw new Error(
-                    'No supported local AI CLI was found. Install the Claude CLI (`claude`) to use desktop-local chat.',
+                    'No supported local AI CLI was found. Install Claude (`claude`) or Codex (`codex`) to use desktop-local chat.',
                 );
             }
 
-            if (cli !== 'claude') {
-                throw new Error(`Unsupported desktop-local chat CLI: ${cli}`);
-            }
-
-            if (resetSession) {
-                await setDesktopLocalConversationCliSession(projectId, conversationId, null, null);
-            }
-
             const conversation = await getDesktopLocalConversation(projectId, conversationId);
-            const resumeFlag = conversation?.cliSessionId
-                ? ` --resume ${shellQuote(conversation.cliSessionId)}`
-                : '';
+            const shouldResume = !resetSession
+                && !!conversation?.cliSessionId
+                && conversation.cliType === selection.cli
+                && conversation.cliModel === selection.model;
+
+            if (!shouldResume) {
+                await setDesktopLocalConversationCliSession(
+                    projectId,
+                    conversationId,
+                    selection.cli,
+                    null,
+                    selection.model,
+                );
+            }
+
             const prompt = buildDesktopLocalPrompt({
                 content,
                 context,
                 type,
             });
-            const commandText =
-                `claude -p${resumeFlag} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions ${shellQuote(prompt)}`;
+            const promptArg = shellQuote(prompt);
+            const modelArg = shellQuote(selection.model);
+            const resumeSessionId = shouldResume ? conversation?.cliSessionId : null;
+            const commandText = selection.cli === 'claude'
+                ? `claude -p --model ${modelArg}${resumeSessionId ? ` --resume ${shellQuote(resumeSessionId)}` : ''} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions ${promptArg}`
+                : resumeSessionId
+                    ? `codex exec resume --json -m ${modelArg} --dangerously-bypass-approvals-and-sandbox ${shellQuote(resumeSessionId)} ${promptArg}`
+                    : `codex exec --json -m ${modelArg} --dangerously-bypass-approvals-and-sandbox ${promptArg}`;
             const provider = editorEngine.activeSandbox.session.provider;
             if (!provider) {
                 throw new Error('Desktop local sandbox provider is not ready');
             }
 
+            activeCliRef.current = selection.cli;
+            activeModelRef.current = selection.model;
             const commandResult = await provider.runBackgroundCommand({
                 args: {
                     command: commandText,
@@ -465,7 +596,12 @@ export function useDesktopLocalChat({
 
     const sendMessage: SendMessage = useCallback(
         async (content: string, type: ChatType) => {
-            posthog.capture('user_send_message', { type, provider: 'desktop-local-cli' });
+            const selection = await getDesktopLocalChatSelection(projectId);
+            posthog.capture('user_send_message', {
+                type,
+                provider: selection?.cli ?? 'desktop-local-cli',
+                model: selection?.model ?? null,
+            });
 
             const context = await editorEngine.chat.context.getContextByChatType(type);
             const newQueuedMessage: QueuedMessage = {
@@ -493,6 +629,7 @@ export function useDesktopLocalChat({
             editorEngine.chat.context,
             isStreaming,
             posthog,
+            projectId,
             processMessage,
             queuedMessages.length,
         ],
@@ -530,9 +667,11 @@ export function useDesktopLocalChat({
 
     const editMessage: EditMessage = useCallback(
         async (messageId: string, newContent: string, chatType: ChatType) => {
+            const selection = await getDesktopLocalChatSelection(projectId);
             posthog.capture('user_edit_message', {
                 type: chatType,
-                provider: 'desktop-local-cli',
+                provider: selection?.cli ?? 'desktop-local-cli',
+                model: selection?.model ?? null,
             });
 
             if (isStreaming) {
@@ -583,6 +722,7 @@ export function useDesktopLocalChat({
             isStreaming,
             persistMessages,
             posthog,
+            projectId,
             runCli,
         ],
     );

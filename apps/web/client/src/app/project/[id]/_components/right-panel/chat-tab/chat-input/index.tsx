@@ -21,12 +21,14 @@ import type { SendMessage } from '@/app/project/[id]/_hooks/use-chat';
 import { useEditorEngine } from '@/components/store/editor';
 import { FOCUS_CHAT_INPUT_EVENT } from '@/components/store/editor/chat';
 import { transKeys } from '@/i18n/keys';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { validateImageLimit } from '../context-pills/helpers';
 import { InputContextPills } from '../context-pills/input-context-pills';
 import { type SuggestionsRef } from '../suggestions';
 import { ActionButtons } from './action-buttons';
 import { ChatContextWindow } from './chat-context';
 import { ChatModeToggle } from './chat-mode-toggle';
+import { DesktopLocalChatModelSelector } from './model-selector';
 import { QueueItems } from './queue-items';
 
 interface ChatInputProps {
@@ -61,6 +63,7 @@ export const ChatInput = observer(
         const [actionTooltipOpen, setActionTooltipOpen] = useState(false);
         const [isDragging, setIsDragging] = useState(false);
         const chatMode = editorEngine.state.chatMode;
+        const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
         const [inputValue, setInputValue] = useState('');
         const lastUsageMessage = useMemo(
             () => messages.findLast((msg) => msg.metadata?.usage),
@@ -435,6 +438,9 @@ export const ChatInput = observer(
                             chatMode={chatMode}
                             onChatModeChange={handleChatModeChange}
                         />
+                        {isDesktopLocal && (
+                            <DesktopLocalChatModelSelector disabled={isStreaming} />
+                        )}
                         {lastUsageMessage?.metadata?.usage && (
                             <ChatContextWindow usage={lastUsageMessage?.metadata?.usage} />
                         )}

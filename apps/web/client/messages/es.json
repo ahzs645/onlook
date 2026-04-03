@@ -245,6 +245,13 @@
                         "mode": {
                             "tooltip": "Cambiar entre modos Construir y Preguntar"
                         },
+                        "model": {
+                            "label": "Model",
+                            "loading": "Loading models...",
+                            "unavailable": "No local AI",
+                            "loadFailed": "Failed to load local AI models.",
+                            "updateFailed": "Failed to update local AI model."
+                        },
                         "controls": {
                             "newChat": "Nuevo Chat",
                             "history": "Historial de Chat"

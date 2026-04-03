@@ -12,26 +12,74 @@ import { isDesktopLocalProjectId, parseDesktopLocalProjectId } from './desktop-l
 
 const DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
 
-export type DesktopLocalChatCli = 'claude';
+export type DesktopLocalChatCli = 'claude' | 'codex';
+export type DesktopLocalChatModelSelection = {
+    cli: DesktopLocalChatCli;
+    model: string;
+};
+
+export interface DesktopLocalChatModelOption {
+    value: string;
+    label: string;
+}
+
+interface DesktopLocalChatPreferences {
+    selectedCli: DesktopLocalChatCli | null;
+    selectedModels: Partial<Record<DesktopLocalChatCli, string>>;
+}
 
 export interface DesktopLocalStoredConversation extends ChatConversation {
     cliSessionId: string | null;
     cliType: DesktopLocalChatCli | null;
+    cliModel: string | null;
 }
 
 interface DesktopLocalChatStore {
     version: 1;
+    preferences: DesktopLocalChatPreferences;
     conversations: DesktopLocalStoredConversation[];
     messagesByConversationId: Record<string, ChatMessage[]>;
 }
 
 type ChatMessageMetadata = NonNullable<ChatMessage['metadata']>;
 
-const cliDetectionByProject = new Map<string, Promise<DesktopLocalChatCli | null>>();
+const DESKTOP_LOCAL_CHAT_CLI_ORDER = ['claude', 'codex'] as const satisfies readonly DesktopLocalChatCli[];
+
+export const DESKTOP_LOCAL_CHAT_PROVIDER_LABELS: Record<DesktopLocalChatCli, string> = {
+    claude: 'Claude',
+    codex: 'Codex',
+};
+
+export const DESKTOP_LOCAL_CHAT_MODEL_OPTIONS: Record<
+    DesktopLocalChatCli,
+    readonly DesktopLocalChatModelOption[]
+> = {
+    claude: [
+        { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+        { value: 'claude-opus-4-6', label: 'Opus 4.6' },
+        { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+    ],
+    codex: [
+        { value: 'gpt-5.4', label: 'GPT-5.4' },
+        { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+        { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+        { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
+    ],
+};
+
+const cliDetectionByProject = new Map<string, Promise<DesktopLocalChatCli[]>>();
+
+function createDefaultPreferences(): DesktopLocalChatPreferences {
+    return {
+        selectedCli: null,
+        selectedModels: {},
+    };
+}
 
 function createEmptyChatStore(): DesktopLocalChatStore {
     return {
         version: 1,
+        preferences: createDefaultPreferences(),
         conversations: [],
         messagesByConversationId: {},
     };
@@ -145,7 +193,41 @@ function hydrateConversation(conversation: unknown): DesktopLocalStoredConversat
             ? (candidate.suggestions as ChatConversation['suggestions'])
             : [],
         cliSessionId: typeof candidate.cliSessionId === 'string' ? candidate.cliSessionId : null,
-        cliType: candidate.cliType === 'claude' ? 'claude' : null,
+        cliType: isDesktopLocalChatCli(candidate.cliType) ? candidate.cliType : null,
+        cliModel: typeof candidate.cliModel === 'string' ? candidate.cliModel : null,
+    };
+}
+
+function isDesktopLocalChatCli(value: unknown): value is DesktopLocalChatCli {
+    return value === 'claude' || value === 'codex';
+}
+
+function isValidDesktopLocalChatModel(cli: DesktopLocalChatCli, model: unknown): model is string {
+    return typeof model === 'string'
+        && DESKTOP_LOCAL_CHAT_MODEL_OPTIONS[cli].some((option) => option.value === model);
+}
+
+function hydratePreferences(preferences: unknown): DesktopLocalChatPreferences {
+    if (!preferences || typeof preferences !== 'object') {
+        return createDefaultPreferences();
+    }
+
+    const candidate = preferences as Record<string, unknown>;
+    const selectedModels =
+        candidate.selectedModels && typeof candidate.selectedModels === 'object'
+            ? (candidate.selectedModels as Record<string, unknown>)
+            : {};
+
+    return {
+        selectedCli: isDesktopLocalChatCli(candidate.selectedCli) ? candidate.selectedCli : null,
+        selectedModels: {
+            claude: isValidDesktopLocalChatModel('claude', selectedModels.claude)
+                ? selectedModels.claude
+                : undefined,
+            codex: isValidDesktopLocalChatModel('codex', selectedModels.codex)
+                ? selectedModels.codex
+                : undefined,
+        },
     };
 }
 
@@ -171,9 +253,25 @@ function hydrateStore(store: unknown): DesktopLocalChatStore {
 
     return {
         version: 1,
+        preferences: hydratePreferences(candidate.preferences),
         conversations,
         messagesByConversationId,
     };
+}
+
+export function getDefaultDesktopLocalChatModel(cli: DesktopLocalChatCli): string {
+    return DESKTOP_LOCAL_CHAT_MODEL_OPTIONS[cli][0]?.value ?? '';
+}
+
+export function getDesktopLocalChatModelOptions(
+    cli: DesktopLocalChatCli,
+): readonly DesktopLocalChatModelOption[] {
+    return DESKTOP_LOCAL_CHAT_MODEL_OPTIONS[cli];
+}
+
+export function getDesktopLocalChatModelLabel(cli: DesktopLocalChatCli, model: string): string {
+    return DESKTOP_LOCAL_CHAT_MODEL_OPTIONS[cli].find((option) => option.value === model)?.label
+        ?? model;
 }
 
 function isMissingFileError(error: unknown) {
@@ -251,6 +349,7 @@ export function createDesktopLocalConversation(
         suggestions: [],
         cliSessionId: null,
         cliType: null,
+        cliModel: null,
     };
 }
 
@@ -403,26 +502,37 @@ export async function setDesktopLocalConversationCliSession(
     conversationId: string,
     cliType: DesktopLocalChatCli | null,
     cliSessionId: string | null,
+    cliModel: string | null,
 ) {
     await updateDesktopLocalConversation(projectId, conversationId, {
         cliType,
         cliSessionId,
+        cliModel,
         updatedAt: new Date(),
     });
 }
 
-async function detectDesktopLocalChatCli(projectId: string): Promise<DesktopLocalChatCli | null> {
+async function detectDesktopLocalChatCli(projectId: string): Promise<DesktopLocalChatCli[]> {
     const { bridge, sessionId } = ensureDesktopLocalProject(projectId);
     const { output } = await bridge.runCommand({
         sessionId,
         command:
-            "if command -v claude >/dev/null 2>&1; then printf 'claude'; else printf ''; fi",
+            "if command -v claude >/dev/null 2>&1; then printf 'claude\n'; fi; if command -v codex >/dev/null 2>&1; then printf 'codex\n'; fi",
     });
 
-    return output.trim() === 'claude' ? 'claude' : null;
+    return output
+        .split('\n')
+        .map((entry) => entry.trim())
+        .filter((entry): entry is DesktopLocalChatCli => isDesktopLocalChatCli(entry))
+        .sort(
+            (left, right) =>
+                DESKTOP_LOCAL_CHAT_CLI_ORDER.indexOf(left) - DESKTOP_LOCAL_CHAT_CLI_ORDER.indexOf(right),
+        );
 }
 
-export async function resolveDesktopLocalChatCli(projectId: string): Promise<DesktopLocalChatCli | null> {
+export async function listAvailableDesktopLocalChatClis(
+    projectId: string,
+): Promise<DesktopLocalChatCli[]> {
     const existing = cliDetectionByProject.get(projectId);
     if (existing) {
         return existing;
@@ -434,4 +544,62 @@ export async function resolveDesktopLocalChatCli(projectId: string): Promise<Des
     });
     cliDetectionByProject.set(projectId, pending);
     return pending;
+}
+
+export async function getDesktopLocalChatSelection(
+    projectId: string,
+): Promise<DesktopLocalChatModelSelection | null> {
+    const [store, availableClis] = await Promise.all([
+        readDesktopLocalChatStore(projectId),
+        listAvailableDesktopLocalChatClis(projectId),
+    ]);
+
+    if (availableClis.length === 0) {
+        return null;
+    }
+
+    const fallbackCli = availableClis[0];
+    if (!fallbackCli) {
+        return null;
+    }
+
+    const preferredCli = store.preferences.selectedCli;
+    const cli = preferredCli && availableClis.includes(preferredCli)
+        ? preferredCli
+        : fallbackCli;
+    const storedModel = store.preferences.selectedModels[cli];
+    const model = isValidDesktopLocalChatModel(cli, storedModel)
+        ? storedModel
+        : getDefaultDesktopLocalChatModel(cli);
+
+    return {
+        cli,
+        model,
+    };
+}
+
+export async function setDesktopLocalChatSelection(
+    projectId: string,
+    selection: DesktopLocalChatModelSelection,
+): Promise<DesktopLocalChatModelSelection> {
+    const store = await readDesktopLocalChatStore(projectId);
+    const nextCli = selection.cli;
+    const nextModel = isValidDesktopLocalChatModel(nextCli, selection.model)
+        ? selection.model
+        : getDefaultDesktopLocalChatModel(nextCli);
+
+    store.preferences = {
+        selectedCli: nextCli,
+        selectedModels: {
+            ...store.preferences.selectedModels,
+            [nextCli]: nextModel,
+        },
+    };
+
+    await writeDesktopLocalChatStore(projectId, store);
+
+    return {
+        cli: nextCli,
+        model: nextModel,
+    };
 }

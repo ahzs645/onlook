@@ -248,6 +248,13 @@ declare const messages: {
                         "mode": {
                             "tooltip": "Switch between Build and Ask modes"
                         },
+                        "model": {
+                            "label": "Model",
+                            "loading": "Loading models...",
+                            "unavailable": "No local AI",
+                            "loadFailed": "Failed to load local AI models.",
+                            "updateFailed": "Failed to update local AI model."
+                        },
                         "controls": {
                             "newChat": "New Chat",
                             "history": "Chat History"

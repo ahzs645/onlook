@@ -245,6 +245,13 @@
                         "mode": {
                             "tooltip": "빌드 모드와 질문 모드 전환"
                         },
+                        "model": {
+                            "label": "Model",
+                            "loading": "Loading models...",
+                            "unavailable": "No local AI",
+                            "loadFailed": "Failed to load local AI models.",
+                            "updateFailed": "Failed to update local AI model."
+                        },
                         "controls": {
                             "newChat": "새 채팅",
                             "history": "채팅 기록"
