@@ -61,6 +61,7 @@ export class CodeFileSystem extends FileSystem {
 
     private async processJsxFile(path: string, content: string): Promise<string> {
         let processedContent = content;
+        let shouldUpdateMetadata = false;
 
         const ast = getAstFromContent(content);
         if (ast) {
@@ -72,14 +73,27 @@ export class CodeFileSystem extends FileSystem {
             const { ast: processedAst } = addOidsToAst(ast, existingOids);
 
             processedContent = await getContentFromAst(processedAst, content);
+            shouldUpdateMetadata = true;
         } else {
             console.warn(`Failed to parse ${path}, skipping OID injection but will still format`);
         }
 
-        const formattedContent = await formatContent(path, processedContent);
-        await this.updateMetadataForFile(path, formattedContent);
+        let finalContent = processedContent;
+        try {
+            finalContent = await formatContent(path, processedContent);
+        } catch (error) {
+            console.warn(`[CodeEditorApi] Failed to format ${path}, writing unformatted content`, error);
+        }
 
-        return formattedContent;
+        if (shouldUpdateMetadata) {
+            try {
+                await this.updateMetadataForFile(path, finalContent);
+            } catch (error) {
+                console.warn(`[CodeEditorApi] Failed to update metadata for ${path}`, error);
+            }
+        }
+
+        return finalContent;
     }
 
     private async getFileOids(path: string): Promise<Set<string>> {

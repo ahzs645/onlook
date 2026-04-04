@@ -3,6 +3,7 @@
 import { useEditorEngine } from '@/components/store/editor';
 import { SubscriptionModal } from '@/components/ui/pricing-modal';
 import { SettingsModalWithProjects } from '@/components/ui/settings-modal/with-project';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { EditorAttributes } from '@onlook/constants';
 import { EditorMode } from '@onlook/models';
 import { Button } from '@onlook/ui/button';
@@ -24,6 +25,7 @@ import { TopBar } from './top-bar';
 export const Main = observer(() => {
     const router = useRouter();
     const editorEngine = useEditorEngine();
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
     const { isProjectReady, error } = useStartProject();
     const leftPanelRef = useRef<HTMLDivElement | null>(null);
     const rightPanelRef = useRef<HTMLDivElement | null>(null);
@@ -128,7 +130,7 @@ export const Main = observer(() => {
                 <BottomBar />
             </div>
             <SettingsModalWithProjects />
-            <SubscriptionModal />
+            {!isDesktopLocal && <SubscriptionModal />}
         </TooltipProvider >
     );
 });

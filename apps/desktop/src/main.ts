@@ -2,13 +2,15 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promises as fs, watch as watchFs, type FSWatcher } from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DEFAULT_WEB_URL = 'http://localhost:4100/desktop';
+const DEFAULT_WEB_URL = 'http://localhost:4100/projects';
 const DEFAULT_LOOPBACK_HOST = 'localhost';
+const DESKTOP_LOCAL_PROJECT_PREFIX = 'desktop-local:';
 const DEFAULT_SHELL = process.env.SHELL ?? '/bin/zsh';
 const MAX_SAMPLE_FILES = 12;
 const MAX_RECENT_PROJECTS = 12;
@@ -135,7 +137,7 @@ class ManagedProcess {
         readonly name: string,
         readonly command: string,
         private readonly cwd: string,
-        private readonly env: NodeJS.ProcessEnv,
+        private env: NodeJS.ProcessEnv,
         private readonly kind: StreamKind,
     ) {
         this.id = id;
@@ -143,6 +145,14 @@ class ManagedProcess {
 
     get isRunning() {
         return this.child !== null && !this.child.killed;
+    }
+
+    setEnv(nextEnv: NodeJS.ProcessEnv) {
+        if (this.isRunning) {
+            throw new Error('Cannot update process environment while the process is running');
+        }
+
+        this.env = nextEnv;
     }
 
     private emitOutput(data: string) {
@@ -311,6 +321,30 @@ class DesktopProjectRuntime {
         return this.summary.previewUrl;
     }
 
+    private updatePreviewPort(port: number) {
+        this.summary = {
+            ...this.summary,
+            port,
+            previewUrl: `http://${DEFAULT_LOOPBACK_HOST}:${port}`,
+        };
+        this.task.setEnv(this.createProcessEnv());
+    }
+
+    private async ensureLaunchPort() {
+        if (await isPortAvailable(this.summary.port)) {
+            return;
+        }
+
+        if (scriptSpecifiesPort(this.summary.scripts.dev)) {
+            throw new Error(
+                `Port ${this.summary.port} is already in use by another process. Stop that process or change the project's configured dev port before launching it in desktop mode.`,
+            );
+        }
+
+        const availablePort = await findAvailablePort(this.summary.port + 1);
+        this.updatePreviewPort(availablePort);
+    }
+
     async start() {
         if (!this.summary.isValid) {
             throw new Error(this.summary.error ?? 'Project is not a valid Next.js app');
@@ -320,6 +354,7 @@ class DesktopProjectRuntime {
             throw new Error('No dev command was detected for this project');
         }
 
+        await this.ensureLaunchPort();
         this.status = 'starting';
         this.lastError = undefined;
 
@@ -657,13 +692,15 @@ function getWebUrl() {
 
 function getDesktopProjectUrl(sessionId: string, projectId?: string) {
     const url = new URL(getWebUrl());
-    url.pathname = '/desktop/project';
+    if (!projectId) {
+        url.pathname = '/projects';
+        return url.toString();
+    }
+
+    url.pathname = `/project/${encodeURIComponent(`${DESKTOP_LOCAL_PROJECT_PREFIX}${projectId}`)}`;
     const searchParams = new URLSearchParams({
         session: sessionId,
     });
-    if (projectId) {
-        searchParams.set('project', projectId);
-    }
     url.search = `?${searchParams.toString()}`;
     return url.toString();
 }
@@ -899,6 +936,39 @@ function detectPortFromScript(script?: string) {
 
     const port = Number.parseInt(match[1], 10);
     return Number.isFinite(port) && port > 0 && port <= 65535 ? port : defaultPort;
+}
+
+function scriptSpecifiesPort(script?: string) {
+    return /(?:PORT=|--port[=\s]|-p\s*?)(\d+)/.test(script ?? '');
+}
+
+async function isPortAvailable(port: number, host = DEFAULT_LOOPBACK_HOST): Promise<boolean> {
+    return await new Promise((resolve) => {
+        const server = net.createServer();
+
+        server.once('error', () => {
+            resolve(false);
+        });
+
+        server.once('listening', () => {
+            server.close(() => resolve(true));
+        });
+
+        server.listen(port, host);
+    });
+}
+
+async function findAvailablePort(startPort: number, host = DEFAULT_LOOPBACK_HOST) {
+    let port = Math.max(startPort, 1);
+
+    while (port <= 65535) {
+        if (await isPortAvailable(port, host)) {
+            return port;
+        }
+        port += 1;
+    }
+
+    throw new Error('Unable to find an available localhost port for the local preview');
 }
 
 function getInstallCommand(packageManager: PackageManager) {
@@ -1592,7 +1662,7 @@ app.whenReady().then(() => {
     const shouldAutoLaunch = Boolean(process.env.ONLOOK_DESKTOP_AUTOLAUNCH_PATH);
     createWindow();
 
-    void (shouldAutoLaunch ? maybeAutoLaunchProject() : maybeResumeRecentProject()).then(
+    void (shouldAutoLaunch ? maybeAutoLaunchProject() : Promise.resolve(false)).then(
         (launched) => {
             if (!launched && mainWindow) {
                 void mainWindow.loadURL(getWebUrl());
@@ -1605,7 +1675,7 @@ app.whenReady().then(() => {
             const shouldAutoLaunch = Boolean(process.env.ONLOOK_DESKTOP_AUTOLAUNCH_PATH);
             createWindow();
 
-            void (shouldAutoLaunch ? maybeAutoLaunchProject() : maybeResumeRecentProject()).then(
+            void (shouldAutoLaunch ? maybeAutoLaunchProject() : Promise.resolve(false)).then(
                 (launched) => {
                     if (!launched && mainWindow) {
                         void mainWindow.loadURL(getWebUrl());

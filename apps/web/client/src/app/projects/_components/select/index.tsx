@@ -1,5 +1,11 @@
 'use client';
 
+import { useDesktopBridge } from '@/app/desktop/use-desktop-bridge';
+import { env } from '@/env';
+import {
+    type DesktopRecentProject,
+    getDesktopLocalProjectRoute,
+} from '@/utils/desktop-local';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Carousel } from '../carousel';
 import localforage from 'localforage';
@@ -14,6 +20,9 @@ import { Icons } from '@onlook/ui/icons';
 import { api } from '@/trpc/react';
 import { useCreateBlankProject } from '@/hooks/use-create-blank-project';
 import { getFileUrlFromStorage } from '@/utils/supabase/client';
+import { useRouter } from 'next/navigation';
+import { SelectProjectPresentation } from '../select-presentation';
+import { DESKTOP_PROJECTS_REFRESH_EVENT } from '../top-bar';
 import { Templates } from '../templates';
 import { TemplateModal } from '../templates/template-modal';
 import { HighlightText } from './highlight-text';
@@ -23,7 +32,193 @@ import { SquareProjectCard } from './square-project-card';
 
 const STARRED_TEMPLATES_KEY = 'onlook_starred_templates';
 
-export const SelectProject = ({ externalSearchQuery }: { externalSearchQuery?: string } = {}) => {
+function toDesktopPresentationProject(project: DesktopRecentProject): Project {
+    const updatedAt = new Date(project.lastOpenedAt);
+
+    return {
+        id: project.id,
+        name: project.name,
+        metadata: {
+            createdAt: updatedAt,
+            updatedAt,
+            previewImg: null,
+            description: project.folderPath,
+            tags: ['desktop-local'],
+        },
+    };
+}
+
+const DesktopSelectProject = ({
+    externalSearchQuery,
+}: {
+    externalSearchQuery?: string;
+}) => {
+    const router = useRouter();
+    const { desktop, isDesktop, isResolving } = useDesktopBridge();
+    const [recentProjects, setRecentProjects] = useState<DesktopRecentProject[]>([]);
+    const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+    const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+    const [launchingProjectId, setLaunchingProjectId] = useState<string | null>(null);
+
+    const refreshProjects = async (preferredProjectId?: string | null) => {
+        if (!desktop) {
+            return [];
+        }
+
+        try {
+            setIsLoadingProjects(true);
+            const projects = await desktop.listProjects();
+            setRecentProjects(projects);
+            setActiveProjectId((current) => {
+                if (preferredProjectId && projects.some((project) => project.id === preferredProjectId)) {
+                    return preferredProjectId;
+                }
+
+                if (current && projects.some((project) => project.id === current)) {
+                    return current;
+                }
+
+                return projects[0]?.id ?? null;
+            });
+            return projects;
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : 'Failed to load desktop projects',
+            );
+            return [];
+        } finally {
+            setIsLoadingProjects(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!desktop) {
+            return;
+        }
+
+        void refreshProjects();
+    }, [desktop]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const handleRefresh = (event: Event) => {
+            const detail = (event as CustomEvent<{ projectId?: string | null }>).detail;
+            void refreshProjects(detail?.projectId ?? null);
+        };
+
+        window.addEventListener(DESKTOP_PROJECTS_REFRESH_EVENT, handleRefresh);
+        return () => {
+            window.removeEventListener(DESKTOP_PROJECTS_REFRESH_EVENT, handleRefresh);
+        };
+    }, [desktop]);
+
+    const projects = useMemo(
+        () => recentProjects.map((project) => toDesktopPresentationProject(project)),
+        [recentProjects],
+    );
+
+    const handleCreateProject = async () => {
+        if (!desktop || !isDesktop) {
+            toast.error('Desktop bridge is not available');
+            return;
+        }
+
+        try {
+            const folderPath = await desktop.pickDirectory();
+            if (!folderPath) {
+                return;
+            }
+
+            const project = await desktop.saveProject(folderPath);
+            setLaunchingProjectId(project.id);
+            const session = await desktop.launchProjectById(project.id);
+            await refreshProjects(project.id);
+
+            router.push(getDesktopLocalProjectRoute(project.id, session.id));
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : 'Failed to open local project',
+            );
+        } finally {
+            setLaunchingProjectId(null);
+        }
+    };
+
+    const handleOpenProject = async (project: Project) => {
+        if (!desktop || !isDesktop) {
+            toast.error('Desktop bridge is not available');
+            return;
+        }
+
+        const targetProject = recentProjects.find((entry) => entry.id === project.id);
+        if (!targetProject) {
+            toast.error('Desktop project not found');
+            return;
+        }
+
+        try {
+            setActiveProjectId(targetProject.id);
+            setLaunchingProjectId(targetProject.id);
+            const session = await desktop.launchProjectById(targetProject.id);
+            await refreshProjects(targetProject.id);
+
+            router.push(getDesktopLocalProjectRoute(targetProject.id, session.id));
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : 'Failed to launch local project',
+            );
+        } finally {
+            setLaunchingProjectId(null);
+        }
+    };
+
+    const handleDeleteProject = async (project: Project) => {
+        if (!desktop) {
+            toast.error('Desktop bridge is not available');
+            return;
+        }
+
+        try {
+            const projects = await desktop.removeProject(project.id);
+            setRecentProjects(projects);
+            setActiveProjectId((current) => (current === project.id ? projects[0]?.id ?? null : current));
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : 'Failed to remove local project',
+            );
+        }
+    };
+
+    return (
+        <div className="w-full">
+            {!isDesktop && !isResolving && (
+                <div className="mx-auto mt-6 w-full max-w-6xl rounded-lg border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100/90">
+                    Open this route in the desktop shell to browse and launch local projects.
+                </div>
+            )}
+            <SelectProjectPresentation
+                allProjects={projects}
+                isLoading={isResolving || isLoadingProjects}
+                externalSearchQuery={externalSearchQuery}
+                isCreatingProject={Boolean(launchingProjectId)}
+                onCreateBlank={() => {
+                    void handleCreateProject();
+                }}
+                onProjectClick={(project) => {
+                    void handleOpenProject(project);
+                }}
+                onDeleteProject={(project) => {
+                    void handleDeleteProject(project);
+                }}
+            />
+        </div>
+    );
+};
+
+const HostedSelectProject = ({ externalSearchQuery }: { externalSearchQuery?: string } = {}) => {
     // Hooks
     const utils = api.useUtils();
     const { data: user } = api.user.get.useQuery();
@@ -520,4 +715,12 @@ export const SelectProject = ({ externalSearchQuery }: { externalSearchQuery?: s
             )}
         </div>
     );
+};
+
+export const SelectProject = (props: { externalSearchQuery?: string } = {}) => {
+    if (env.NEXT_PUBLIC_ONLOOK_DESKTOP_MODE) {
+        return <DesktopSelectProject {...props} />;
+    }
+
+    return <HostedSelectProject {...props} />;
 };

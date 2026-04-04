@@ -126,6 +126,7 @@ export class TextEditingManager {
     }
 
     async clean(): Promise<void> {
+        const targetDomEl = this.targetDomEl;
         if (this.targetDomEl) {
             try {
                 const frameData = this.editorEngine.frames.get(this.targetDomEl.frameId);
@@ -135,8 +136,15 @@ export class TextEditingManager {
             }
         }
         this.targetDomEl = null;
+        this.originalContent = null;
         this.editorEngine.overlay.state.removeTextEditor();
-        await this.editorEngine.history.commitTransaction();
+        const branchId = targetDomEl?.branchId;
+        const branchHistory = branchId
+            ? this.editorEngine.branches.getBranchDataById(branchId)?.history
+            : null;
+        if (branchHistory) {
+            await branchHistory.commitTransaction();
+        }
         this.shouldNotStartEditing = false;
     }
 

@@ -1,7 +1,9 @@
 'use client';
 
+import { useOptionalDesktopLocalProject } from '../_components/desktop-local-context';
 import { useEditorEngine } from '@/components/store/editor';
 import { api } from '@/trpc/react';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { type ProjectCreateRequest } from '@onlook/db';
 import {
     ChatType,
@@ -25,14 +27,28 @@ interface ProjectReadyState {
 export const useStartProject = () => {
     const editorEngine = useEditorEngine();
     const sandbox = editorEngine.activeSandbox;
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
+    const desktopLocalProject = useOptionalDesktopLocalProject();
     const [error, setError] = useState<string | null>(null);
     const processedRequestIdRef = useRef<string | null>(null);
     const { tabState } = useTabActive();
     const apiUtils = api.useUtils();
-    const { data: user, error: userError } = api.user.get.useQuery();
-    const { data: canvasWithFrames, error: canvasError } = api.userCanvas.getWithFrames.useQuery({ projectId: editorEngine.projectId });
-    const { data: conversations, error: conversationsError } = api.chat.conversation.getAll.useQuery({ projectId: editorEngine.projectId });
-    const { data: creationRequest, error: creationRequestError } = api.project.createRequest.getPendingRequest.useQuery({ projectId: editorEngine.projectId });
+    const { data: user, error: userError } = api.user.get.useQuery(undefined, {
+        enabled: !isDesktopLocal,
+    });
+    const { data: canvasWithFrames, error: canvasError } = api.userCanvas.getWithFrames.useQuery(
+        { projectId: editorEngine.projectId },
+        { enabled: !isDesktopLocal },
+    );
+    const { data: conversations, error: conversationsError } = api.chat.conversation.getAll.useQuery(
+        { projectId: editorEngine.projectId },
+        { enabled: !isDesktopLocal },
+    );
+    const { data: creationRequest, error: creationRequestError } =
+        api.project.createRequest.getPendingRequest.useQuery(
+            { projectId: editorEngine.projectId },
+            { enabled: !isDesktopLocal },
+        );
     const { mutateAsync: updateCreateRequest } = api.project.createRequest.updateStatus.useMutation({
         onSettled: async () => {
             await apiUtils.project.createRequest.getPendingRequest.invalidate({ projectId: editorEngine.projectId });
@@ -49,26 +65,38 @@ export const useStartProject = () => {
     };
 
     useEffect(() => {
+        if (isDesktopLocal) {
+            return;
+        }
+
         if (!sandbox.session.isConnecting) {
             updateProjectReadyState({ sandbox: true });
         }
-    }, [sandbox.session.isConnecting]);
+    }, [isDesktopLocal, sandbox.session.isConnecting]);
 
     useEffect(() => {
         if (tabState === 'reactivated') {
-            sandbox.session.reconnect(editorEngine.projectId, user?.id);
+            sandbox.session.reconnect(editorEngine.branches.activeBranch.sandbox.id, user?.id);
         }
-    }, [tabState, sandbox.session]);
+    }, [editorEngine.branches.activeBranch.sandbox.id, sandbox.session, tabState, user?.id]);
 
     useEffect(() => {
+        if (isDesktopLocal) {
+            return;
+        }
+
         if (canvasWithFrames) {
             editorEngine.canvas.applyCanvas(canvasWithFrames.userCanvas);
             editorEngine.frames.applyFrames(canvasWithFrames.frames);
             updateProjectReadyState({ canvas: true });
         }
-    }, [canvasWithFrames]);
+    }, [canvasWithFrames, editorEngine.canvas, editorEngine.frames, isDesktopLocal]);
 
     useEffect(() => {
+        if (isDesktopLocal) {
+            return;
+        }
+
         const applyConversations = async () => {
             if (conversations) {
                 await editorEngine.chat.conversation.applyConversations(conversations);
@@ -76,15 +104,19 @@ export const useStartProject = () => {
             }
         };
         void applyConversations();
-    }, [editorEngine.chat.conversation, conversations]);
+    }, [conversations, editorEngine.chat.conversation, isDesktopLocal]);
 
     useEffect(() => {
+        if (isDesktopLocal) {
+            return;
+        }
+
         const isProjectReady = Object.values(projectReadyState).every((value) => value);
         if (creationRequest && processedRequestIdRef.current !== creationRequest.id && isProjectReady && editorEngine.chat._sendMessageAction) {
             processedRequestIdRef.current = creationRequest.id;
             void resumeCreate(creationRequest);
         }
-    }, [creationRequest, projectReadyState, editorEngine.chat._sendMessageAction]);
+    }, [creationRequest, editorEngine.chat._sendMessageAction, isDesktopLocal, projectReadyState]);
 
     const resumeCreate = async (creationData: ProjectCreateRequest) => {
         try {
@@ -143,11 +175,20 @@ export const useStartProject = () => {
             });
         }
     };
-
-
     useEffect(() => {
+        if (isDesktopLocal) {
+            return;
+        }
+
         setError(userError?.message ?? canvasError?.message ?? conversationsError?.message ?? creationRequestError?.message ?? null);
-    }, [userError, canvasError, conversationsError, creationRequestError]);
+    }, [canvasError, conversationsError, creationRequestError, isDesktopLocal, userError]);
+
+    if (isDesktopLocal) {
+        return {
+            isProjectReady: desktopLocalProject?.isProjectReady ?? false,
+            error: desktopLocalProject?.error ?? null,
+        };
+    }
 
     return { isProjectReady: Object.values(projectReadyState).every((value) => value), error };
 }

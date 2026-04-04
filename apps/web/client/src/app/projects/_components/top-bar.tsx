@@ -1,10 +1,17 @@
 'use client';
 
 import { useAuthContext } from '@/app/auth/auth-context';
+import { useDesktopBridge } from '@/app/desktop/use-desktop-bridge';
 import { CurrentUserAvatar } from '@/components/ui/avatar-dropdown';
+import { env } from '@/env';
 import { transKeys } from '@/i18n/keys';
 import { api } from '@/trpc/react';
 import { LocalForageKeys, Routes } from '@/utils/constants';
+import {
+    DESKTOP_LOCAL_PROJECT_QUERY_KEY,
+    DESKTOP_LOCAL_SESSION_QUERY_KEY,
+    getDesktopLocalProjectRoute,
+} from '@/utils/desktop-local';
 import { SandboxTemplates, Templates } from '@onlook/constants';
 import { Button } from '@onlook/ui/button';
 import {
@@ -32,7 +39,140 @@ interface TopBarProps {
     onSearchChange?: (q: string) => void;
 }
 
-export const TopBar = ({ searchQuery, onSearchChange }: TopBarProps) => {
+const DESKTOP_PROJECTS_REFRESH_EVENT = 'onlook_desktop_projects_refresh';
+
+const DesktopTopBar = ({ searchQuery, onSearchChange }: TopBarProps) => {
+    const t = useTranslations();
+    const router = useRouter();
+    const [isSearchFocused, setIsSearchFocused] = useState(false);
+    const [isCreatingProject, setIsCreatingProject] = useState(false);
+    const searchInputRef = useRef<HTMLInputElement>(null);
+    const searchContainerRef = useRef<HTMLDivElement>(null);
+    const { desktop, isDesktop, isResolving } = useDesktopBridge();
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (
+                searchContainerRef.current &&
+                !searchContainerRef.current.contains(event.target as Node)
+            ) {
+                setIsSearchFocused(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    useEffect(() => {
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setIsSearchFocused(false);
+                searchInputRef.current?.blur();
+                onSearchChange?.('');
+            }
+        };
+
+        document.addEventListener('keydown', handleEscape);
+        return () => {
+            document.removeEventListener('keydown', handleEscape);
+        };
+    }, [onSearchChange]);
+
+    const handleOpenLocalProject = async () => {
+        if (!desktop) {
+            toast.error('Desktop bridge is not available');
+            return;
+        }
+
+        try {
+            setIsCreatingProject(true);
+            const folderPath = await desktop.pickDirectory();
+            if (!folderPath) {
+                return;
+            }
+
+            const project = await desktop.saveProject(folderPath);
+            window.dispatchEvent(
+                new CustomEvent(DESKTOP_PROJECTS_REFRESH_EVENT, {
+                    detail: { projectId: project.id },
+                }),
+            );
+
+            const session = await desktop.launchProjectById(project.id);
+            router.push(getDesktopLocalProjectRoute(project.id, session.id));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to open local project';
+            toast.error(message);
+        } finally {
+            setIsCreatingProject(false);
+        }
+    };
+
+    return (
+        <div className="w-full max-w-6xl mx-auto flex items-center justify-between p-4 text-small text-foreground-secondary gap-6">
+            <Link href={Routes.HOME} className="flex items-center justify-start mt-0 py-3">
+                <Icons.OnlookTextLogo className="w-24" viewBox="0 0 139 17" />
+            </Link>
+
+            {typeof onSearchChange === 'function' ? (
+                <div className="flex-1 flex justify-center min-w-0">
+                    <motion.div
+                        ref={searchContainerRef}
+                        className="relative w-full hidden sm:block"
+                        initial={false}
+                        animate={isSearchFocused ?
+                            { width: '100%', maxWidth: '360px' } :
+                            { width: '100%', maxWidth: '260px' }
+                        }
+                        transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
+                    >
+                        <Icons.MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-foreground-tertiary z-10" />
+                        <Input
+                            ref={searchInputRef}
+                            value={searchQuery ?? ''}
+                            onChange={(e) => onSearchChange?.(e.currentTarget.value)}
+                            onFocus={() => setIsSearchFocused(true)}
+                            placeholder="Search projects"
+                            className="pl-9 pr-7 focus-visible:border-transparent focus-visible:ring-0 w-full"
+                        />
+                        {searchQuery && (
+                            <button
+                                onClick={() => onSearchChange?.('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-foreground-tertiary hover:text-foreground"
+                                aria-label="Clear search"
+                            >
+                                <Icons.CrossS className="h-4 w-4" />
+                            </button>
+                        )}
+                    </motion.div>
+                </div>
+            ) : (
+                <div className="flex-1" />
+            )}
+
+            <div className="flex justify-end gap-3 mt-0 items-center">
+                <Button
+                    className="text-sm focus:outline-none cursor-pointer py-[0.4rem] h-8"
+                    variant="default"
+                    disabled={!isDesktop || isResolving || isCreatingProject}
+                    onClick={handleOpenLocalProject}
+                >
+                    {isCreatingProject ? (
+                        <>
+                            Opening... <Icons.LoadingSpinner className="animate-spin" />
+                        </>
+                    ) : (
+                        <>
+                            {t(transKeys.projects.actions.importProject)} <Icons.Upload />
+                        </>
+                    )}
+                </Button>
+            </div>
+        </div>
+    );
+};
+
+const HostedTopBar = ({ searchQuery, onSearchChange }: TopBarProps) => {
     const t = useTranslations();
     const router = useRouter();
     const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -266,3 +406,13 @@ export const TopBar = ({ searchQuery, onSearchChange }: TopBarProps) => {
         </div>
     );
 };
+
+export const TopBar = (props: TopBarProps) => {
+    if (env.NEXT_PUBLIC_ONLOOK_DESKTOP_MODE) {
+        return <DesktopTopBar {...props} />;
+    }
+
+    return <HostedTopBar {...props} />;
+};
+
+export { DESKTOP_PROJECTS_REFRESH_EVENT };

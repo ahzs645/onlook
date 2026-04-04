@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { isDesktopLocalProjectId, parseDesktopLocalProjectId } from './desktop-local';
 
 const DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
+const DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json.tmp`;
 
 export type DesktopLocalChatCli = 'claude' | 'codex';
 export type DesktopLocalChatSessionStatus =
@@ -463,6 +464,99 @@ function isMissingFileError(error: unknown) {
     return error instanceof Error && /ENOENT|not found/i.test(error.message);
 }
 
+function findRootJsonDocumentEnd(content: string): number | null {
+    let depth = 0;
+    let inString = false;
+    let isEscaped = false;
+    let started = false;
+
+    for (let index = 0; index < content.length; index++) {
+        const char = content[index];
+        if (!char) {
+            continue;
+        }
+
+        if (!started) {
+            if (/\s/.test(char)) {
+                continue;
+            }
+
+            if (char !== '{' && char !== '[') {
+                return null;
+            }
+
+            started = true;
+            depth = 1;
+            continue;
+        }
+
+        if (inString) {
+            if (isEscaped) {
+                isEscaped = false;
+                continue;
+            }
+
+            if (char === '\\') {
+                isEscaped = true;
+                continue;
+            }
+
+            if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inString = true;
+            continue;
+        }
+
+        if (char === '{' || char === '[') {
+            depth += 1;
+            continue;
+        }
+
+        if (char === '}' || char === ']') {
+            depth -= 1;
+            if (depth === 0) {
+                return index + 1;
+            }
+        }
+    }
+
+    return null;
+}
+
+function parseDesktopLocalChatStoreContent(content: string) {
+    const trimmedContent = content.trim();
+    if (!trimmedContent) {
+        return {
+            store: createEmptyChatStore(),
+            repairedContent: null as string | null,
+        };
+    }
+
+    try {
+        return {
+            store: hydrateStore(JSON.parse(trimmedContent)),
+            repairedContent: null as string | null,
+        };
+    } catch (error) {
+        const documentEnd = findRootJsonDocumentEnd(trimmedContent);
+        if (!documentEnd || documentEnd >= trimmedContent.length) {
+            throw error;
+        }
+
+        const recoveredContent = trimmedContent.slice(0, documentEnd);
+        const recoveredStore = hydrateStore(JSON.parse(recoveredContent));
+        return {
+            store: recoveredStore,
+            repairedContent: JSON.stringify(recoveredStore, null, 2),
+        };
+    }
+}
+
 async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLocalChatStore> {
     const { bridge, sessionId } = await resolveDesktopLocalProjectSession(projectId);
 
@@ -488,7 +582,22 @@ async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLoca
             return createEmptyChatStore();
         }
 
-        return hydrateStore(JSON.parse(content));
+        const { store, repairedContent } = parseDesktopLocalChatStoreContent(content);
+        if (repairedContent) {
+            await bridge.writeFile({
+                sessionId,
+                path: DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH,
+                content: repairedContent,
+                overwrite: true,
+            });
+            await bridge.renameFile({
+                sessionId,
+                oldPath: DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH,
+                newPath: DESKTOP_LOCAL_CHAT_STORE_PATH,
+            });
+        }
+
+        return store;
     } catch (error) {
         if (isMissingFileError(error)) {
             return createEmptyChatStore();
@@ -505,11 +614,17 @@ async function writeDesktopLocalChatStore(projectId: string, store: DesktopLocal
         path: ONLOOK_CACHE_DIRECTORY,
     });
 
+    const serializedStore = JSON.stringify(store, null, 2);
     await bridge.writeFile({
         sessionId,
-        path: DESKTOP_LOCAL_CHAT_STORE_PATH,
-        content: JSON.stringify(store, null, 2),
+        path: DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH,
+        content: serializedStore,
         overwrite: true,
+    });
+    await bridge.renameFile({
+        sessionId,
+        oldPath: DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH,
+        newPath: DESKTOP_LOCAL_CHAT_STORE_PATH,
     });
 }
 

@@ -1,4 +1,5 @@
 import { api } from "@/trpc/server";
+import { isDesktopLocalProjectId } from "@/utils/desktop-local";
 import { Routes } from "@/utils/constants";
 import { SUPPORT_EMAIL } from "@onlook/constants";
 import { Icons } from "@onlook/ui/icons/index";
@@ -6,6 +7,9 @@ import Link from "next/link";
 
 export default async function Layout({ params, children }: Readonly<{ params: Promise<{ id: string }>, children: React.ReactNode }>) {
     const projectId = (await params).id;
+    if (isDesktopLocalProjectId(projectId)) {
+        return <>{children}</>;
+    }
     const hasAccess = await api.project.hasAccess({ projectId });
     if (!hasAccess) {
         return <NoAccess />;

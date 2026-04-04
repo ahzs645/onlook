@@ -17,7 +17,7 @@ const spawnArgs =
 const port = process.env.PORT ?? '4100';
 const hostname = process.env.HOSTNAME ?? 'localhost';
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? `http://${hostname}:${port}`;
-const desktopUrl = process.env.ONLOOK_DESKTOP_WEB_URL ?? `${siteUrl}/desktop`;
+const desktopUrl = process.env.ONLOOK_DESKTOP_WEB_URL ?? `${siteUrl}/projects`;
 
 const child = Bun.spawn([command, ...spawnArgs], {
     stdin: 'inherit',
@@ -33,6 +33,7 @@ const child = Bun.spawn([command, ...spawnArgs], {
             process.env.ELECTRON_DISABLE_SECURITY_WARNINGS ?? 'true',
         ONLOOK_DESKTOP_MODE: 'true',
         ONLOOK_DESKTOP_WEB_URL: desktopUrl,
+        NEXT_PUBLIC_ONLOOK_DESKTOP_MODE: 'true',
         SANDBOX_PROVIDER: process.env.SANDBOX_PROVIDER ?? 'node_fs',
         NEXT_PUBLIC_SANDBOX_PROVIDER: process.env.NEXT_PUBLIC_SANDBOX_PROVIDER ?? 'node_fs',
         SUPABASE_DATABASE_URL: process.env.SUPABASE_DATABASE_URL ?? 'https://desktop.onlook.invalid/db',

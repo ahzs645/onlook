@@ -8,6 +8,7 @@ export const env = createEnv({
      */
     server: {
         NODE_ENV: z.enum(['development', 'test', 'production']),
+        ONLOOK_DESKTOP_MODE: z.string().optional(),
         CSB_API_KEY: z.string().optional(),
         SANDBOX_PROVIDER: z
             .enum(['code_sandbox', 'e2b', 'daytona', 'vercel_sandbox', 'modal', 'node_fs'])
@@ -75,6 +76,7 @@ export const env = createEnv({
      * `NEXT_PUBLIC_`.
      */
     client: {
+        NEXT_PUBLIC_ONLOOK_DESKTOP_MODE: z.coerce.boolean().default(false),
         NEXT_PUBLIC_SITE_URL: z.url().default('http://localhost:3000'),
         NEXT_PUBLIC_SUPABASE_URL: z.string(),
         NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string(),
@@ -95,6 +97,7 @@ export const env = createEnv({
      */
     runtimeEnv: {
         NODE_ENV: process.env.NODE_ENV,
+        ONLOOK_DESKTOP_MODE: process.env.ONLOOK_DESKTOP_MODE,
         CSB_API_KEY: process.env.CSB_API_KEY,
         SANDBOX_PROVIDER: process.env.SANDBOX_PROVIDER,
         E2B_API_KEY: process.env.E2B_API_KEY,
@@ -108,6 +111,7 @@ export const env = createEnv({
         // Supabase
         SUPABASE_DATABASE_URL: process.env.SUPABASE_DATABASE_URL,
         SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        NEXT_PUBLIC_ONLOOK_DESKTOP_MODE: process.env.NEXT_PUBLIC_ONLOOK_DESKTOP_MODE,
         NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
         NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
         NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,

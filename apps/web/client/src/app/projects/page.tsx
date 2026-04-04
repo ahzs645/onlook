@@ -2,6 +2,7 @@
 
 import { SubscriptionModal } from '@/components/ui/pricing-modal';
 import { NonProjectSettingsModal } from '@/components/ui/settings-modal/non-project';
+import { env } from '@/env';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import { SelectProject } from './_components/select';
@@ -15,8 +16,8 @@ const Page = observer(() => {
             <div className="flex justify-center w-full h-full overflow-y-auto overflow-x-visible">
                 <SelectProject externalSearchQuery={searchQuery} />
             </div>
-            <SubscriptionModal />
-            <NonProjectSettingsModal />
+            {!env.NEXT_PUBLIC_ONLOOK_DESKTOP_MODE && <SubscriptionModal />}
+            {!env.NEXT_PUBLIC_ONLOOK_DESKTOP_MODE && <NonProjectSettingsModal />}
         </div>
     );
 });

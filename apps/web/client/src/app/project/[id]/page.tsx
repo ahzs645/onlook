@@ -1,11 +1,41 @@
 import { api } from '@/trpc/server';
+import {
+    DESKTOP_LOCAL_SESSION_QUERY_KEY,
+    isDesktopLocalProjectId,
+    parseDesktopLocalProjectId,
+} from '@/utils/desktop-local';
+import { DesktopLocalProjectRoute } from './_components/desktop-local-route';
 import { Main } from './_components/main';
 import { ProjectProviders } from './providers';
 
-export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+export default async function Page({
+    params,
+    searchParams,
+}: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
     const projectId = (await params).id;
     if (!projectId) {
         return <div>Invalid project ID</div>;
+    }
+
+    if (isDesktopLocalProjectId(projectId)) {
+        const desktopProjectId = parseDesktopLocalProjectId(projectId);
+        if (!desktopProjectId) {
+            return <div>Invalid desktop project ID</div>;
+        }
+
+        const resolvedSearchParams = await searchParams;
+        const sessionParam = resolvedSearchParams[DESKTOP_LOCAL_SESSION_QUERY_KEY];
+        const sessionId = Array.isArray(sessionParam) ? (sessionParam[0] ?? null) : (sessionParam ?? null);
+
+        return (
+            <DesktopLocalProjectRoute
+                desktopProjectId={desktopProjectId}
+                initialSessionId={sessionId}
+            />
+        );
     }
 
     try {
