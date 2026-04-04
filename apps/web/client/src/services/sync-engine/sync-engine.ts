@@ -78,14 +78,12 @@ export class CodeProviderSync {
                 );
             }
             existing.refCount++;
-            console.log(`[Sync] Reusing existing sync instance for ${key} (refCount: ${existing.refCount})`);
             return existing.sync;
         }
 
         const sync = new CodeProviderSync(provider, fs, config);
         sync.instanceKey = key;
         CodeProviderSync.instances.set(key, { sync, refCount: 1 });
-        console.log(`[Sync] Created new sync instance for ${key} (refCount: 1)`);
         return sync;
     }
 
@@ -113,10 +111,8 @@ export class CodeProviderSync {
         }
 
         instance.refCount--;
-        console.log(`[Sync] Released reference to ${this.instanceKey} (refCount: ${instance.refCount})`);
 
         if (instance.refCount <= 0) {
-            console.log(`[Sync] Stopping and removing sync instance ${this.instanceKey}`);
             this.stop();
             CodeProviderSync.instances.delete(this.instanceKey);
             this.instanceKey = null;

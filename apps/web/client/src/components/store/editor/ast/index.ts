@@ -147,7 +147,6 @@ export class AstManager {
             }
 
             if (childrenWithSameOid.length === 0) {
-                console.warn('Failed to findNodeInstance: No children found with matching OID');
                 return;
             }
 
@@ -156,9 +155,6 @@ export class AstManager {
             );
 
             if (index === -1) {
-                console.warn(
-                    'Failed to findNodeInstance: Original node not found in children with same OID',
-                );
                 return;
             }
 

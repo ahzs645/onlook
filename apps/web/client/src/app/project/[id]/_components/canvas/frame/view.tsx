@@ -33,6 +33,14 @@ function isDestroyedConnectionError(error: unknown): boolean {
     return error.message.toLowerCase().includes('destroyed connection');
 }
 
+function isPenpalTimeoutError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    return error.message.toLowerCase().includes('penpal connection timeout');
+}
+
 const createSafeFallbackMethods = (): PromisifiedPendpalChildMethods => {
     const fallbackUndefined = async () => undefined;
     const fallbackNull = async () => null;
@@ -114,6 +122,7 @@ export const FrameComponent = observer(
             const iframeRef = useRef<HTMLIFrameElement>(null);
             const zoomLevel = useRef(1);
             const isConnecting = useRef(false);
+            const connectionAttemptRef = useRef(0);
             const connectionRef = useRef<ReturnType<typeof connect> | null>(null);
             const [penpalChild, setPenpalChild] = useState<PenpalChildMethods | null>(null);
             const isSelected = editorEngine.frames.isSelected(frame.id);
@@ -128,12 +137,10 @@ export const FrameComponent = observer(
                     }
 
                     if (isConnecting.current) {
-                        console.log(
-                            `${PENPAL_PARENT_CHANNEL} (${frame.id}) - Connection already in progress`,
-                        );
                         return;
                     }
                     isConnecting.current = true;
+                    const connectionAttempt = ++connectionAttemptRef.current;
 
                     // Destroy any existing connection
                     if (connectionRef.current) {
@@ -167,31 +174,40 @@ export const FrameComponent = observer(
                     });
 
                     connectionRef.current = connection;
+                    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
                     // Create a timeout promise that rejects after specified timeout
                     const timeoutPromise = new Promise<never>((_, reject) => {
-                        setTimeout(() => {
+                        timeoutId = setTimeout(() => {
                             reject(
                                 new Error(`Penpal connection timeout after ${penpalTimeoutMs}ms`),
                             );
                         }, penpalTimeoutMs);
                     });
 
+                    const clearConnectionTimeout = () => {
+                        if (timeoutId) {
+                            clearTimeout(timeoutId);
+                            timeoutId = null;
+                        }
+                    };
+
                     // Race the connection promise against the timeout
                     Promise.race([connection.promise, timeoutPromise])
                         .then((child) => {
+                            clearConnectionTimeout();
+                            if (connectionAttempt !== connectionAttemptRef.current) {
+                                return;
+                            }
                             isConnecting.current = false;
                             if (!child) {
-                                console.error(
-                                    `${PENPAL_PARENT_CHANNEL} (${frame.id}) - Connection failed: child is null`,
-                                );
+                                connection.destroy();
+                                if (connectionRef.current === connection) {
+                                    connectionRef.current = null;
+                                }
                                 onConnectionFailed();
                                 return;
                             }
-
-                            console.log(
-                                `${PENPAL_PARENT_CHANNEL} (${frame.id}) - Penpal connection set`,
-                            );
 
                             const remote = child as unknown as PenpalChildMethods;
                             setPenpalChild(remote);
@@ -204,11 +220,27 @@ export const FrameComponent = observer(
                             onConnectionSuccess();
                         })
                         .catch((error) => {
+                            clearConnectionTimeout();
+                            if (connectionAttempt !== connectionAttemptRef.current) {
+                                return;
+                            }
                             isConnecting.current = false;
-                            console.error(
-                                `${PENPAL_PARENT_CHANNEL} (${frame.id}) - Failed to setup penpal connection:`,
-                                error,
-                            );
+                            connection.destroy();
+                            if (connectionRef.current === connection) {
+                                connectionRef.current = null;
+                            }
+                            if (
+                                !isDestroyedConnectionError(error) &&
+                                !isPenpalTimeoutError(error)
+                            ) {
+                                console.error(
+                                    `${PENPAL_PARENT_CHANNEL} (${frame.id}) - Failed to setup penpal connection:`,
+                                    error,
+                                );
+                            }
+                            if (isDestroyedConnectionError(error)) {
+                                return;
+                            }
                             onConnectionFailed();
                         });
                 } catch (error) {
@@ -333,6 +365,7 @@ export const FrameComponent = observer(
 
             useEffect(() => {
                 return () => {
+                    connectionAttemptRef.current += 1;
                     if (connectionRef.current) {
                         connectionRef.current.destroy();
                         connectionRef.current = null;

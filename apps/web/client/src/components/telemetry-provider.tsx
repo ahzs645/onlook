@@ -27,19 +27,19 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
 
     // Initialize SDKs once
     useEffect(() => {
-        if (env.NEXT_PUBLIC_POSTHOG_KEY) {
-            try {
-                posthog.init(env.NEXT_PUBLIC_POSTHOG_KEY, {
-                    api_host: env.NEXT_PUBLIC_POSTHOG_HOST,
-                    capture_pageview: "history_change",
-                    capture_pageleave: true,
-                    capture_exceptions: true,
-                });
-            } catch (e) {
-                console.warn("PostHog init failed", e);
-            }
-        } else {
-            console.warn("PostHog key is not set, skipping initialization");
+        if (!env.NEXT_PUBLIC_POSTHOG_KEY) {
+            return;
+        }
+
+        try {
+            posthog.init(env.NEXT_PUBLIC_POSTHOG_KEY, {
+                api_host: env.NEXT_PUBLIC_POSTHOG_HOST,
+                capture_pageview: "history_change",
+                capture_pageleave: true,
+                capture_exceptions: true,
+            });
+        } catch (e) {
+            console.warn("PostHog init failed", e);
         }
 
         if (env.NEXT_PUBLIC_GLEAP_API_KEY) {

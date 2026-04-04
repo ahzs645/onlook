@@ -6,6 +6,14 @@ import { preloadMethods } from './api';
 export let penpalParent: PromisifiedPenpalParentMethods | null = null;
 let isConnecting = false;
 
+function isDestroyedConnectionError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    return error.message.toLowerCase().includes('destroyed connection');
+}
+
 /**
  * Find the correct parent window for Onlook connection.
  * Handles both direct iframes (Next.js) and nested iframes (Storybook).
@@ -26,7 +34,6 @@ const findOnlookParent = (): Window => {
     // We're in a nested iframe (parent is NOT the top window)
     // This is the Storybook case: Onlook -> CodeSandbox -> Storybook preview iframe
     if (window.top) {
-        console.log(`${PENPAL_CHILD_CHANNEL} - Using window.top for nested iframe scenario`);
         return window.top;
     }
 
@@ -40,7 +47,6 @@ const createMessageConnection = async () => {
     }
 
     isConnecting = true;
-    console.log(`${PENPAL_CHILD_CHANNEL} - Creating penpal connection`);
 
     const messenger = new WindowMessenger({
         remoteWindow: findOnlookParent(),
@@ -56,19 +62,19 @@ const createMessageConnection = async () => {
 
     connection.promise.then((parent) => {
         if (!parent) {
-            console.error(`${PENPAL_CHILD_CHANNEL} - Failed to setup penpal connection: child is null`);
             reconnect();
             return;
         }
         const remote = parent as unknown as PromisifiedPenpalParentMethods;
         penpalParent = remote;
-        console.log(`${PENPAL_CHILD_CHANNEL} - Penpal connection set`);
     }).finally(() => {
         isConnecting = false;
     });
 
     connection.promise.catch((error) => {
-        console.error(`${PENPAL_CHILD_CHANNEL} - Failed to setup penpal connection:`, error);
+        if (isDestroyedConnectionError(error)) {
+            return;
+        }
         reconnect();
     });
 
@@ -78,7 +84,6 @@ const createMessageConnection = async () => {
 const reconnect = debounce(() => {
     if (isConnecting) return;
 
-    console.log(`${PENPAL_CHILD_CHANNEL} - Reconnecting to penpal parent`);
     penpalParent = null; // Reset the parent before reconnecting
     createMessageConnection();
 }, 1000);
