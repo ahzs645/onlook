@@ -80,7 +80,6 @@ export class AstManager {
 
         const metadata = await branchData.codeEditor.getJsxElementMetadata(node.oid);
         if (!metadata) {
-            console.warn('Failed to processNodeForMap: Metadata not found');
             return;
         }
 
@@ -135,7 +134,6 @@ export class AstManager {
         }
         const parentMetadata = await branchData.codeEditor.getJsxElementMetadata(parent.oid);
         if (!parentMetadata) {
-            console.warn('Failed to findNodeInstance: Parent metadata not found');
             return;
         }
 

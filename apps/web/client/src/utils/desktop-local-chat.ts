@@ -11,7 +11,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { isDesktopLocalProjectId, parseDesktopLocalProjectId } from './desktop-local';
 
 const DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
-const DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json.tmp`;
 
 export type DesktopLocalChatCli = 'claude' | 'codex';
 export type DesktopLocalChatSessionStatus =
@@ -464,6 +463,14 @@ function isMissingFileError(error: unknown) {
     return error instanceof Error && /ENOENT|not found/i.test(error.message);
 }
 
+function isDesktopLocalChatSessionLocked(session: DesktopLocalConversationSessionState | null) {
+    return session?.status === 'submitted' || session?.status === 'running';
+}
+
+function createDesktopLocalChatStoreTempPath() {
+    return `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.${uuidv4()}.tmp`;
+}
+
 function findRootJsonDocumentEnd(content: string): number | null {
     let depth = 0;
     let inString = false;
@@ -584,15 +591,16 @@ async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLoca
 
         const { store, repairedContent } = parseDesktopLocalChatStoreContent(content);
         if (repairedContent) {
+            const tempPath = createDesktopLocalChatStoreTempPath();
             await bridge.writeFile({
                 sessionId,
-                path: DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH,
+                path: tempPath,
                 content: repairedContent,
                 overwrite: true,
             });
             await bridge.renameFile({
                 sessionId,
-                oldPath: DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH,
+                oldPath: tempPath,
                 newPath: DESKTOP_LOCAL_CHAT_STORE_PATH,
             });
         }
@@ -615,15 +623,16 @@ async function writeDesktopLocalChatStore(projectId: string, store: DesktopLocal
     });
 
     const serializedStore = JSON.stringify(store, null, 2);
+    const tempPath = createDesktopLocalChatStoreTempPath();
     await bridge.writeFile({
         sessionId,
-        path: DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH,
+        path: tempPath,
         content: serializedStore,
         overwrite: true,
     });
     await bridge.renameFile({
         sessionId,
-        oldPath: DESKTOP_LOCAL_CHAT_STORE_TEMP_PATH,
+        oldPath: tempPath,
         newPath: DESKTOP_LOCAL_CHAT_STORE_PATH,
     });
 }
@@ -955,16 +964,20 @@ export async function setDesktopLocalChatSelection(
         const existingConversation = store.conversations.find(
             (conversation) => conversation.id === options.conversationId,
         );
-        const lockedProvider = existingConversation?.session.providerName ?? null;
+        const lockedProvider = isDesktopLocalChatSessionLocked(existingConversation?.session ?? null)
+            ? existingConversation?.session.providerName ?? null
+            : null;
         const effectiveCli = lockedProvider ?? nextCli;
-        const effectiveSelection = normalizeDesktopLocalChatSelection(
-            effectiveCli,
-            lockedProvider === nextCli
-                ? nextModel
-                : existingConversation?.draftSelection?.cli === effectiveCli
-                    ? existingConversation.draftSelection.model
-                    : existingConversation?.session.model,
-        );
+        const effectiveSelection = lockedProvider
+            ? normalizeDesktopLocalChatSelection(
+                effectiveCli,
+                lockedProvider === nextCli
+                    ? nextModel
+                    : existingConversation?.draftSelection?.cli === effectiveCli
+                        ? existingConversation.draftSelection.model
+                        : existingConversation?.session.model,
+            )
+            : normalizeDesktopLocalChatSelection(effectiveCli, nextModel);
         resolvedSelection = effectiveSelection;
         const nextConversation = hydrateConversation({
             ...(existingConversation ?? createDesktopLocalConversation(projectId)),
@@ -994,7 +1007,10 @@ function resolveDesktopLocalChatSelectionFromConversation(
     conversation: DesktopLocalStoredConversation | null,
     availableClis: DesktopLocalChatCli[],
 ): DesktopLocalChatModelSelection | null {
-    if (conversation?.session.providerName) {
+    if (
+        conversation?.session.providerName
+        && isDesktopLocalChatSessionLocked(conversation.session)
+    ) {
         const preferredModel =
             conversation.draftSelection?.cli === conversation.session.providerName
                 ? conversation.draftSelection.model
@@ -1008,12 +1024,26 @@ function resolveDesktopLocalChatSelectionFromConversation(
     }
 
     if (
-        conversation?.draftSelection
+        conversation?.session.providerName
+        && conversation?.draftSelection
         && availableClis.includes(conversation.draftSelection.cli)
     ) {
         return normalizeDesktopLocalChatSelection(
             conversation.draftSelection.cli,
             conversation.draftSelection.model,
+        );
+    }
+
+    if (
+        conversation?.session.providerName
+        && availableClis.includes(conversation.session.providerName)
+    ) {
+        return normalizeDesktopLocalChatSelection(
+            conversation.session.providerName,
+            conversation.draftSelection?.cli === conversation.session.providerName
+                ? conversation.draftSelection.model
+                : conversation.session.model
+                    ?? store.preferences.selectedModels[conversation.session.providerName],
         );
     }
 
@@ -1041,6 +1071,9 @@ export async function getDesktopLocalChatPickerState(
         (entry) => entry.id === conversationId,
     ) ?? null;
     const session = conversation?.session ?? createEmptyConversationSession();
+    const lockedProvider = isDesktopLocalChatSessionLocked(session)
+        ? session.providerName
+        : null;
 
     return {
         availableClis,
@@ -1049,7 +1082,7 @@ export async function getDesktopLocalChatPickerState(
             conversation,
             availableClis,
         ),
-        lockedProvider: session.providerName,
+        lockedProvider,
         session,
     };
 }

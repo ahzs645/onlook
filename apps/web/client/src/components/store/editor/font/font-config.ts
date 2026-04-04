@@ -245,6 +245,10 @@ const createDefaultFontConfigTemplate = (): string => {
 `;
 }
 
+function isAlreadyExistsError(error: unknown) {
+    return error instanceof Error && /EEXIST|File exists/i.test(error.message);
+}
+
 /**
  * Ensures the font configuration file exists
  */
@@ -253,7 +257,14 @@ export const ensureFontConfigFileExists = async (fontConfigPath: string, editorE
     const fontConfigExists = await codeEditor.fileExists(fontConfigPath);
     if (!fontConfigExists) {
         const template = createDefaultFontConfigTemplate();
-        await codeEditor.writeFile(fontConfigPath, template);
+        try {
+            await codeEditor.writeFile(fontConfigPath, template);
+        } catch (error) {
+            if (isAlreadyExistsError(error) || (await codeEditor.fileExists(fontConfigPath))) {
+                return;
+            }
+            throw error;
+        }
     }
 }
 
@@ -281,4 +292,3 @@ export const getFontConfigPath = async (editorEngine: EditorEngine): Promise<str
         return null;
     }
 }
-

@@ -75,7 +75,7 @@ export class CodeFileSystem extends FileSystem {
             processedContent = await getContentFromAst(processedAst, content);
             shouldUpdateMetadata = true;
         } else {
-            console.warn(`Failed to parse ${path}, skipping OID injection but will still format`);
+            return content;
         }
 
         let finalContent = processedContent;
@@ -141,13 +141,7 @@ export class CodeFileSystem extends FileSystem {
 
     async getJsxElementMetadata(oid: string): Promise<JsxElementMetadata | undefined> {
         const index = await this.loadIndex();
-        const metadata = index[oid];
-        if (!metadata) {
-            console.warn(
-                `[CodeEditorApi] No metadata found for OID: ${oid}. Total index size: ${Object.keys(index).length}`,
-            );
-        }
-        return metadata;
+        return index[oid];
     }
 
     async rebuildIndex(): Promise<void> {
@@ -275,6 +269,12 @@ export class CodeFileSystem extends FileSystem {
     private isJsxFile(path: string): boolean {
         // Exclude the onlook preload script from JSX processing
         if (path.endsWith(ONLOOK_PRELOAD_SCRIPT_FILE)) {
+            return false;
+        }
+        if (
+            path.includes('/public/docs/_astro/')
+            || path.includes('/docs/starlight/.astro/')
+        ) {
             return false;
         }
         return /\.(jsx?|tsx?)$/i.test(path);

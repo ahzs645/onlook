@@ -408,9 +408,6 @@ export class FileSystem {
                                 });
                             } else {
                                 // New path, it's a create
-                                if (!isOnlookCachePath(filePath)) {
-                                    console.log(`[FileSystem] Detected create for ${filePath}`);
-                                }
                                 callback({
                                     type: 'create',
                                     path: filePath,
@@ -423,9 +420,6 @@ export class FileSystem {
                             }
                         } catch (error) {
                             // File doesn't exist, it was deleted
-                            if (!isOnlookCachePath(filePath)) {
-                                console.log(`[FileSystem] Detected delete for ${filePath}`);
-                            }
                             callback({
                                 type: 'delete',
                                 path: filePath,

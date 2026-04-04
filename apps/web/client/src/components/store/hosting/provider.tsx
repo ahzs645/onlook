@@ -2,6 +2,7 @@
 
 import { useEditorEngine } from '@/components/store/editor';
 import { api } from '@/trpc/react';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { type Deployment } from '@onlook/db';
 import { DeploymentStatus, DeploymentType } from '@onlook/models';
 import { toast } from '@onlook/ui/sonner';
@@ -39,6 +40,7 @@ interface HostingProviderProps {
 
 export const HostingProvider = ({ children }: HostingProviderProps) => {
     const editorEngine = useEditorEngine();
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
     const [subscriptionStates, setSubscriptionStates] = useState<Record<DeploymentType, boolean>>({
         [DeploymentType.PREVIEW]: false,
         [DeploymentType.CUSTOM]: false,
@@ -51,6 +53,7 @@ export const HostingProvider = ({ children }: HostingProviderProps) => {
         projectId: editorEngine.projectId,
         type: DeploymentType.PREVIEW,
     }, {
+        enabled: !isDesktopLocal,
         refetchInterval: subscriptionStates[DeploymentType.PREVIEW] ? 1000 : false,
     });
 
@@ -58,6 +61,7 @@ export const HostingProvider = ({ children }: HostingProviderProps) => {
         projectId: editorEngine.projectId,
         type: DeploymentType.CUSTOM,
     }, {
+        enabled: !isDesktopLocal,
         refetchInterval: subscriptionStates[DeploymentType.CUSTOM] ? 1000 : false,
     });
 
@@ -65,6 +69,7 @@ export const HostingProvider = ({ children }: HostingProviderProps) => {
         projectId: editorEngine.projectId,
         type: DeploymentType.UNPUBLISH_PREVIEW,
     }, {
+        enabled: !isDesktopLocal,
         refetchInterval: subscriptionStates[DeploymentType.UNPUBLISH_PREVIEW] ? 1000 : false,
     });
 
@@ -72,6 +77,7 @@ export const HostingProvider = ({ children }: HostingProviderProps) => {
         projectId: editorEngine.projectId,
         type: DeploymentType.UNPUBLISH_CUSTOM,
     }, {
+        enabled: !isDesktopLocal,
         refetchInterval: subscriptionStates[DeploymentType.UNPUBLISH_CUSTOM] ? 1000 : false,
     });
 
@@ -118,6 +124,11 @@ export const HostingProvider = ({ children }: HostingProviderProps) => {
 
     // Publish function
     const publish = async (params: PublishParams): Promise<{ success: boolean } | null> => {
+        if (isDesktopLocal) {
+            toast.error('Publishing is unavailable for desktop-local projects');
+            return { success: false };
+        }
+
         let deployment: Deployment | null = null;
         try {
             setSubscriptionStates(prev => ({
@@ -163,6 +174,11 @@ export const HostingProvider = ({ children }: HostingProviderProps) => {
 
     // Unpublish function
     const unpublish = async (projectId: string, type: DeploymentType) => {
+        if (isDesktopLocal) {
+            toast.error('Publishing is unavailable for desktop-local projects');
+            return null;
+        }
+
         try {
             setSubscriptionStates(prev => ({
                 ...prev,
@@ -185,6 +201,10 @@ export const HostingProvider = ({ children }: HostingProviderProps) => {
 
     // Refetch functions
     const refetch = (type: DeploymentType) => {
+        if (isDesktopLocal) {
+            return;
+        }
+
         switch (type) {
             case DeploymentType.PREVIEW:
                 previewQuery.refetch();
@@ -202,6 +222,11 @@ export const HostingProvider = ({ children }: HostingProviderProps) => {
     };
 
     const cancel = async (type: DeploymentType) => {
+        if (isDesktopLocal) {
+            toast.error('Publishing is unavailable for desktop-local projects');
+            return;
+        }
+
         if (!deployments[type]) {
             toast.error('No deployment found');
             return;

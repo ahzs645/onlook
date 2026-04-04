@@ -44,17 +44,26 @@ export interface DesktopRecentProject extends DesktopProjectSummary {
     status: DesktopProjectSessionStatus | null;
 }
 
+export function normalizeDesktopLocalProjectId(projectId: string): string {
+    try {
+        return decodeURIComponent(projectId);
+    } catch {
+        return projectId;
+    }
+}
+
 export function createDesktopLocalProjectId(projectId: string): string {
     return `${DESKTOP_LOCAL_PROJECT_PREFIX}${projectId}`;
 }
 
 export function isDesktopLocalProjectId(projectId: string): boolean {
-    return projectId.startsWith(DESKTOP_LOCAL_PROJECT_PREFIX);
+    return normalizeDesktopLocalProjectId(projectId).startsWith(DESKTOP_LOCAL_PROJECT_PREFIX);
 }
 
 export function parseDesktopLocalProjectId(projectId: string): string | null {
-    return isDesktopLocalProjectId(projectId)
-        ? projectId.slice(DESKTOP_LOCAL_PROJECT_PREFIX.length)
+    const normalizedProjectId = normalizeDesktopLocalProjectId(projectId);
+    return isDesktopLocalProjectId(normalizedProjectId)
+        ? normalizedProjectId.slice(DESKTOP_LOCAL_PROJECT_PREFIX.length)
         : null;
 }
 
@@ -65,7 +74,7 @@ export function getDesktopLocalProjectRoute(projectId: string, sessionId?: strin
     }
 
     const query = params.toString();
-    return `/project/${encodeURIComponent(createDesktopLocalProjectId(projectId))}${query ? `?${query}` : ''}`;
+    return `/project/${createDesktopLocalProjectId(projectId)}${query ? `?${query}` : ''}`;
 }
 
 type DesktopProviderBridge = NodeFsDesktopProviderBridge;

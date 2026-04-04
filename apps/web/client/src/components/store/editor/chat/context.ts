@@ -286,7 +286,7 @@ export class ChatContext {
             const agentRuleContexts: AgentRuleMessageContext[] = (await Promise.all(
                 agentRuleFileNames.map(async (fileName) => {
                     const filePath = `./${fileName}`;
-                    if (!sandbox.fileExists(filePath)) {
+                    if (!(await sandbox.fileExists(filePath))) {
                         return null;
                     }
                     const fileContent = await this.editorEngine.activeSandbox.readFile(filePath);

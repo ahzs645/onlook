@@ -332,12 +332,11 @@ export class CodeProviderSync {
     }
 
     private async pushModifiedFilesToSandbox(): Promise<void> {
-        console.log('[Sync] Pushing locally modified files back to sandbox...');
-
         try {
             // Get all local JSX/TSX files that might have been modified with OIDs
             const localFiles = await this.fs.listFiles('/');
             const jsxFiles = localFiles.filter(path => /\.(jsx?|tsx?)$/i.test(path));
+            let pushedCount = 0;
 
             // TODO: Use available batch write API
             await Promise.all(
@@ -353,13 +352,17 @@ export class CodeProviderSync {
                                     overwrite: true
                                 }
                             });
-                            console.log(`[Sync] Pushed ${filePath} to sandbox`);
+                            pushedCount += 1;
                         }
                     } catch (error) {
                         console.warn(`[Sync] Failed to push ${filePath} to sandbox:`, error);
                     }
                 })
             );
+
+            if (pushedCount > 0) {
+                console.log(`[Sync] Pushed ${pushedCount} locally modified files back to sandbox`);
+            }
         } catch (error) {
             console.error('[Sync] Error pushing files to sandbox:', error);
         }

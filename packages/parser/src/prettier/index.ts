@@ -8,7 +8,6 @@ export async function formatContent(filePath: string, content: string): Promise<
     try {
         const extension = path.extname(filePath);
         if (!NEXT_JS_FILE_EXTENSIONS.includes(extension)) {
-            console.log('Skipping formatting for unsupported file extension:', filePath);
             return content;
         }
 
@@ -18,8 +17,7 @@ export async function formatContent(filePath: string, content: string): Promise<
             parser: 'typescript',
         });
         return formattedContent;
-    } catch (error: any) {
-        console.error('Error formatting file:', error);
+    } catch {
         return content;
     }
 }
