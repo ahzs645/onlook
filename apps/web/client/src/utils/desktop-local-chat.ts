@@ -13,6 +13,7 @@ import { isDesktopLocalProjectId, parseDesktopLocalProjectId } from './desktop-l
 const DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
 
 export type DesktopLocalChatCli = 'claude' | 'codex';
+export type DesktopLocalChatCodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type DesktopLocalChatSessionStatus =
     | 'idle'
     | 'submitted'
@@ -25,6 +26,12 @@ export type DesktopLocalChatRuntimeMode = 'full-access';
 export type DesktopLocalChatModelSelection = {
     cli: DesktopLocalChatCli;
     model: string;
+    reasoningEffort: DesktopLocalChatCodexReasoningEffort | null;
+};
+export type DesktopLocalChatModelSelectionInput = {
+    cli: DesktopLocalChatCli;
+    model: string;
+    reasoningEffort?: DesktopLocalChatCodexReasoningEffort | null;
 };
 
 export interface DesktopLocalChatModelOption {
@@ -32,9 +39,15 @@ export interface DesktopLocalChatModelOption {
     label: string;
 }
 
+export interface DesktopLocalChatCodexReasoningEffortOption {
+    value: DesktopLocalChatCodexReasoningEffort;
+    label: string;
+}
+
 interface DesktopLocalChatPreferences {
     selectedCli: DesktopLocalChatCli | null;
     selectedModels: Partial<Record<DesktopLocalChatCli, string>>;
+    codexReasoningEffort: DesktopLocalChatCodexReasoningEffort | null;
 }
 
 export interface DesktopLocalConversationSessionState {
@@ -42,6 +55,7 @@ export interface DesktopLocalConversationSessionState {
     runtimeMode: DesktopLocalChatRuntimeMode;
     providerName: DesktopLocalChatCli | null;
     model: string | null;
+    reasoningEffort: DesktopLocalChatCodexReasoningEffort | null;
     sessionId: string | null;
     activeTurnId: string | null;
     lastError: string | null;
@@ -95,12 +109,20 @@ export const DESKTOP_LOCAL_CHAT_MODEL_OPTIONS: Record<
     ],
 };
 
+const DESKTOP_LOCAL_CHAT_CODEX_REASONING_EFFORT_OPTIONS: readonly DesktopLocalChatCodexReasoningEffortOption[] = [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'xhigh', label: 'Extra High' },
+] as const;
+
 const cliDetectionByProject = new Map<string, Promise<DesktopLocalChatCli[]>>();
 
 function createDefaultPreferences(): DesktopLocalChatPreferences {
     return {
         selectedCli: null,
         selectedModels: {},
+        codexReasoningEffort: null,
     };
 }
 
@@ -112,6 +134,7 @@ function createEmptyConversationSession(
         runtimeMode: 'full-access',
         providerName: null,
         model: null,
+        reasoningEffort: null,
         sessionId: null,
         activeTurnId: null,
         lastError: null,
@@ -270,27 +293,48 @@ function isValidDesktopLocalChatModel(cli: DesktopLocalChatCli, model: unknown):
         && DESKTOP_LOCAL_CHAT_MODEL_OPTIONS[cli].some((option) => option.value === model);
 }
 
+function isDesktopLocalChatCodexReasoningEffort(
+    value: unknown,
+): value is DesktopLocalChatCodexReasoningEffort {
+    return value === 'low'
+        || value === 'medium'
+        || value === 'high'
+        || value === 'xhigh';
+}
+
+function normalizeDesktopLocalChatCodexReasoningEffort(
+    value: unknown,
+): DesktopLocalChatCodexReasoningEffort | null {
+    return isDesktopLocalChatCodexReasoningEffort(value) ? value : null;
+}
+
 function normalizeDesktopLocalChatSelection(
     cli: DesktopLocalChatCli,
     model: unknown,
+    reasoningEffort?: unknown,
 ): DesktopLocalChatModelSelection {
     return {
         cli,
         model: isValidDesktopLocalChatModel(cli, model)
             ? model
             : getDefaultDesktopLocalChatModel(cli),
+        reasoningEffort:
+            cli === 'codex'
+                ? normalizeDesktopLocalChatCodexReasoningEffort(reasoningEffort)
+                : null,
     };
 }
 
 function maybeCreateDesktopLocalChatSelection(
     cli: DesktopLocalChatCli | null,
     model: unknown,
+    reasoningEffort?: unknown,
 ): DesktopLocalChatModelSelection | null {
     if (!cli) {
         return null;
     }
 
-    return normalizeDesktopLocalChatSelection(cli, model);
+    return normalizeDesktopLocalChatSelection(cli, model, reasoningEffort);
 }
 
 function hydrateConversationSession(
@@ -313,6 +357,9 @@ function hydrateConversationSession(
         typeof candidate.model === 'string'
             ? candidate.model
             : fallback.legacyCliModel;
+    const reasoningEffort = normalizeDesktopLocalChatCodexReasoningEffort(
+        candidate.reasoningEffort,
+    );
     const sessionId =
         typeof candidate.sessionId === 'string'
             ? candidate.sessionId
@@ -327,6 +374,7 @@ function hydrateConversationSession(
         runtimeMode: candidate.runtimeMode === 'full-access' ? 'full-access' : 'full-access',
         providerName,
         model: typeof model === 'string' ? model : null,
+        reasoningEffort: providerName === 'codex' ? reasoningEffort : null,
         sessionId: typeof sessionId === 'string' ? sessionId : null,
         activeTurnId: typeof candidate.activeTurnId === 'string' ? candidate.activeTurnId : null,
         lastError: typeof candidate.lastError === 'string' ? candidate.lastError : null,
@@ -385,8 +433,15 @@ function hydrateConversation(conversation: unknown): DesktopLocalStoredConversat
                 candidate.draftSelection && typeof candidate.draftSelection === 'object'
                     ? (candidate.draftSelection as Record<string, unknown>).model
                     : null,
+                candidate.draftSelection && typeof candidate.draftSelection === 'object'
+                    ? (candidate.draftSelection as Record<string, unknown>).reasoningEffort
+                    : null,
             )
-            ?? maybeCreateDesktopLocalChatSelection(session.providerName, session.model)
+            ?? maybeCreateDesktopLocalChatSelection(
+                session.providerName,
+                session.model,
+                session.reasoningEffort,
+            )
             ?? maybeCreateDesktopLocalChatSelection(legacyCliType, legacyCliModel),
         session,
     };
@@ -413,6 +468,9 @@ function hydratePreferences(preferences: unknown): DesktopLocalChatPreferences {
                 ? selectedModels.codex
                 : undefined,
         },
+        codexReasoningEffort: normalizeDesktopLocalChatCodexReasoningEffort(
+            candidate.codexReasoningEffort,
+        ),
     };
 }
 
@@ -457,6 +515,23 @@ export function getDesktopLocalChatModelOptions(
 export function getDesktopLocalChatModelLabel(cli: DesktopLocalChatCli, model: string): string {
     return DESKTOP_LOCAL_CHAT_MODEL_OPTIONS[cli].find((option) => option.value === model)?.label
         ?? model;
+}
+
+export function getDesktopLocalChatCodexReasoningEffortOptions():
+readonly DesktopLocalChatCodexReasoningEffortOption[] {
+    return DESKTOP_LOCAL_CHAT_CODEX_REASONING_EFFORT_OPTIONS;
+}
+
+export function getDesktopLocalChatCodexReasoningEffortLabel(
+    reasoningEffort: DesktopLocalChatCodexReasoningEffort | null,
+): string {
+    if (!reasoningEffort) {
+        return 'Default';
+    }
+
+    return DESKTOP_LOCAL_CHAT_CODEX_REASONING_EFFORT_OPTIONS.find(
+        (option) => option.value === reasoningEffort,
+    )?.label ?? reasoningEffort;
 }
 
 function isMissingFileError(error: unknown) {
@@ -853,6 +928,7 @@ export async function setDesktopLocalConversationCliSession(
         status: cliType ? 'running' : 'idle',
         providerName: cliType,
         model: cliModel,
+        reasoningEffort: null,
         sessionId: cliSessionId,
         updatedAt: new Date(),
     });
@@ -929,15 +1005,16 @@ export async function getDesktopLocalChatSelection(
         ? storedModel
         : getDefaultDesktopLocalChatModel(cli);
 
-    return {
+    return normalizeDesktopLocalChatSelection(
         cli,
         model,
-    };
+        cli === 'codex' ? store.preferences.codexReasoningEffort : null,
+    );
 }
 
 export async function setDesktopLocalChatSelection(
     projectId: string,
-    selection: DesktopLocalChatModelSelection,
+    selection: DesktopLocalChatModelSelectionInput,
     options?: {
         conversationId?: string;
     },
@@ -947,9 +1024,26 @@ export async function setDesktopLocalChatSelection(
     const nextModel = isValidDesktopLocalChatModel(nextCli, selection.model)
         ? selection.model
         : getDefaultDesktopLocalChatModel(nextCli);
+    const existingConversation = options?.conversationId
+        ? store.conversations.find(
+            (conversation) => conversation.id === options.conversationId,
+        ) ?? null
+        : null;
+    const preferredCodexReasoningEffort =
+        existingConversation?.draftSelection?.cli === 'codex'
+            ? existingConversation.draftSelection.reasoningEffort
+            : existingConversation?.session.providerName === 'codex'
+                ? existingConversation.session.reasoningEffort
+                : store.preferences.codexReasoningEffort;
+    const nextReasoningEffort = nextCli === 'codex'
+        ? selection.reasoningEffort === undefined
+            ? preferredCodexReasoningEffort
+            : normalizeDesktopLocalChatCodexReasoningEffort(selection.reasoningEffort)
+        : null;
     let resolvedSelection: DesktopLocalChatModelSelection = {
         cli: nextCli,
         model: nextModel,
+        reasoningEffort: nextReasoningEffort,
     };
 
     store.preferences = {
@@ -958,16 +1052,25 @@ export async function setDesktopLocalChatSelection(
             ...store.preferences.selectedModels,
             [nextCli]: nextModel,
         },
+        codexReasoningEffort:
+            nextCli === 'codex'
+                ? nextReasoningEffort
+                : store.preferences.codexReasoningEffort,
     };
 
     if (options?.conversationId) {
-        const existingConversation = store.conversations.find(
-            (conversation) => conversation.id === options.conversationId,
-        );
         const lockedProvider = isDesktopLocalChatSessionLocked(existingConversation?.session ?? null)
             ? existingConversation?.session.providerName ?? null
             : null;
         const effectiveCli = lockedProvider ?? nextCli;
+        const effectiveReasoningEffort = effectiveCli === 'codex'
+            ? selection.reasoningEffort === undefined
+                ? existingConversation?.draftSelection?.cli === 'codex'
+                    ? existingConversation.draftSelection.reasoningEffort
+                    : existingConversation?.session.reasoningEffort
+                        ?? nextReasoningEffort
+                : normalizeDesktopLocalChatCodexReasoningEffort(selection.reasoningEffort)
+            : null;
         const effectiveSelection = lockedProvider
             ? normalizeDesktopLocalChatSelection(
                 effectiveCli,
@@ -976,8 +1079,13 @@ export async function setDesktopLocalChatSelection(
                     : existingConversation?.draftSelection?.cli === effectiveCli
                         ? existingConversation.draftSelection.model
                         : existingConversation?.session.model,
+                effectiveReasoningEffort,
             )
-            : normalizeDesktopLocalChatSelection(effectiveCli, nextModel);
+            : normalizeDesktopLocalChatSelection(
+                effectiveCli,
+                nextModel,
+                effectiveReasoningEffort,
+            );
         resolvedSelection = effectiveSelection;
         const nextConversation = hydrateConversation({
             ...(existingConversation ?? createDesktopLocalConversation(projectId)),
@@ -1020,6 +1128,10 @@ function resolveDesktopLocalChatSelectionFromConversation(
             preferredModel
                 ?? store.preferences.selectedModels[conversation.session.providerName]
                 ?? conversation.session.model,
+            conversation.draftSelection?.cli === conversation.session.providerName
+                ? conversation.draftSelection.reasoningEffort
+                : conversation.session.reasoningEffort
+                    ?? store.preferences.codexReasoningEffort,
         );
     }
 
@@ -1031,6 +1143,7 @@ function resolveDesktopLocalChatSelectionFromConversation(
         return normalizeDesktopLocalChatSelection(
             conversation.draftSelection.cli,
             conversation.draftSelection.model,
+            conversation.draftSelection.reasoningEffort,
         );
     }
 
@@ -1044,6 +1157,10 @@ function resolveDesktopLocalChatSelectionFromConversation(
                 ? conversation.draftSelection.model
                 : conversation.session.model
                     ?? store.preferences.selectedModels[conversation.session.providerName],
+            conversation.draftSelection?.cli === conversation.session.providerName
+                ? conversation.draftSelection.reasoningEffort
+                : conversation.session.reasoningEffort
+                    ?? store.preferences.codexReasoningEffort,
         );
     }
 
@@ -1056,7 +1173,11 @@ function resolveDesktopLocalChatSelectionFromConversation(
     const cli = preferredCli && availableClis.includes(preferredCli)
         ? preferredCli
         : fallbackCli;
-    return normalizeDesktopLocalChatSelection(cli, store.preferences.selectedModels[cli]);
+    return normalizeDesktopLocalChatSelection(
+        cli,
+        store.preferences.selectedModels[cli],
+        cli === 'codex' ? store.preferences.codexReasoningEffort : null,
+    );
 }
 
 export async function getDesktopLocalChatPickerState(

@@ -1,5 +1,6 @@
 import { useEditorEngine } from '@/components/store/editor';
 import { useStateManager } from '@/components/store/state';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import type { PageNode } from '@onlook/models';
 import { Button } from '@onlook/ui/button';
 import { Icons } from '@onlook/ui/icons';
@@ -48,6 +49,7 @@ export const SettingsModalWithProjects = observer(() => {
     const editorEngine = useEditorEngine();
     const stateManager = useStateManager();
     const pagesManager = editorEngine.pages;
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
 
     const flattenPages = useMemo(() => {
         return pagesManager.tree.reduce((acc, page) => {
@@ -69,11 +71,13 @@ export const SettingsModalWithProjects = observer(() => {
             icon: <Icons.Person className="mr-2 h-4 w-4" />,
             component: <PreferencesTab />,
         },
-        {
-            label: SettingsTabValue.SUBSCRIPTION,
-            icon: <Icons.CreditCard className="mr-2 h-4 w-4" />,
-            component: <SubscriptionTab />,
-        },
+        ...(!isDesktopLocal
+            ? [{
+                label: SettingsTabValue.SUBSCRIPTION,
+                icon: <Icons.CreditCard className="mr-2 h-4 w-4" />,
+                component: <SubscriptionTab />,
+            }]
+            : []),
     ];
 
     const projectTabs: SettingTab[] = [
@@ -82,11 +86,13 @@ export const SettingsModalWithProjects = observer(() => {
             icon: <Icons.File className="mr-2 h-4 w-4" />,
             component: <SiteTab />,
         },
-        {
-            label: SettingsTabValue.DOMAIN,
-            icon: <Icons.Globe className="mr-2 h-4 w-4" />,
-            component: <DomainTab />,
-        },
+        ...(!isDesktopLocal
+            ? [{
+                label: SettingsTabValue.DOMAIN,
+                icon: <Icons.Globe className="mr-2 h-4 w-4" />,
+                component: <DomainTab />,
+            }]
+            : []),
         {
             label: SettingsTabValue.PROJECT,
             icon: <Icons.Gear className="mr-2 h-4 w-4" />,
@@ -115,7 +121,20 @@ export const SettingsModalWithProjects = observer(() => {
             return;
         }
         editorEngine.pages.scanPages();
-    }, [stateManager.isSettingsModalOpen]);
+    }, [editorEngine.pages, stateManager.isSettingsModalOpen]);
+
+    useEffect(() => {
+        if (!isDesktopLocal) {
+            return;
+        }
+
+        if (
+            stateManager.settingsTab === SettingsTabValue.DOMAIN
+            || stateManager.settingsTab === SettingsTabValue.SUBSCRIPTION
+        ) {
+            stateManager.settingsTab = SettingsTabValue.VERSIONS;
+        }
+    }, [isDesktopLocal, stateManager, stateManager.settingsTab]);
 
     return (
         <AnimatePresence>

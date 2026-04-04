@@ -6,6 +6,7 @@ import {
     getDesktopLocalChatSelection,
     replaceDesktopLocalConversationMessages,
     setDesktopLocalChatSelection,
+    type DesktopLocalChatCodexReasoningEffort,
     updateDesktopLocalConversationSession,
     type DesktopLocalChatSessionStatus,
     type DesktopLocalChatCli,
@@ -261,6 +262,7 @@ export function useDesktopLocalChat({
     const activeAssistantMessageIdRef = useRef<string | null>(null);
     const activeCliRef = useRef<DesktopLocalChatCli | null>(null);
     const activeModelRef = useRef<string | null>(null);
+    const activeReasoningEffortRef = useRef<DesktopLocalChatCodexReasoningEffort | null>(null);
     const activeTurnIdRef = useRef<string | null>(null);
     const activeTurnStartedAtRef = useRef<Date | null>(null);
 
@@ -425,6 +427,7 @@ export function useDesktopLocalChat({
         activeAssistantMessageIdRef.current = null;
         activeCliRef.current = null;
         activeModelRef.current = null;
+        activeReasoningEffortRef.current = null;
     }, []);
 
     const finalizeCommand = useCallback(
@@ -436,6 +439,7 @@ export function useDesktopLocalChat({
                 status: nextStatus,
                 providerName: activeCliRef.current,
                 model: activeModelRef.current,
+                reasoningEffort: activeReasoningEffortRef.current,
                 activeTurnId: activeTurnIdRef.current,
                 completedAt,
                 lastError: nextError?.message ?? null,
@@ -460,6 +464,7 @@ export function useDesktopLocalChat({
                             status: 'running',
                             providerName: 'claude',
                             model: activeModelRef.current,
+                            reasoningEffort: activeReasoningEffortRef.current,
                             sessionId: event.session_id,
                             activeTurnId: activeTurnIdRef.current,
                             startedAt: activeTurnStartedAtRef.current,
@@ -501,6 +506,7 @@ export function useDesktopLocalChat({
                             status: 'running',
                             providerName: 'claude',
                             model: activeModelRef.current,
+                            reasoningEffort: activeReasoningEffortRef.current,
                             sessionId: event.session_id,
                             activeTurnId: activeTurnIdRef.current,
                             startedAt: activeTurnStartedAtRef.current,
@@ -538,6 +544,7 @@ export function useDesktopLocalChat({
                             status: 'running',
                             providerName: 'codex',
                             model: activeModelRef.current,
+                            reasoningEffort: activeReasoningEffortRef.current,
                             sessionId: event.thread_id,
                             activeTurnId: activeTurnIdRef.current,
                             startedAt: activeTurnStartedAtRef.current,
@@ -663,6 +670,7 @@ export function useDesktopLocalChat({
                 && !!pickerState.session.sessionId
                 && pickerState.session.providerName === selection.cli
                 && pickerState.session.model === selection.model
+                && pickerState.session.reasoningEffort === selection.reasoningEffort
                 && pickerState.session.status !== 'error'
                 && pickerState.session.status !== 'interrupted';
             const nextStartedAt = activeTurnStartedAtRef.current ?? new Date();
@@ -671,6 +679,7 @@ export function useDesktopLocalChat({
                 status: 'submitted',
                 providerName: selection.cli,
                 model: selection.model,
+                reasoningEffort: selection.reasoningEffort,
                 sessionId: shouldResume ? pickerState.session.sessionId : null,
                 activeTurnId: activeTurnIdRef.current,
                 startedAt: nextStartedAt,
@@ -686,15 +695,19 @@ export function useDesktopLocalChat({
             });
             const promptArg = shellQuote(prompt);
             const modelArg = shellQuote(selection.model);
+            const codexReasoningEffortArg = selection.cli === 'codex' && selection.reasoningEffort
+                ? ` -c model_reasoning_effort=${shellQuote(selection.reasoningEffort)}`
+                : '';
             const resumeSessionId = shouldResume ? pickerState.session.sessionId : null;
             const commandText = selection.cli === 'claude'
                 ? `claude -p --model ${modelArg}${resumeSessionId ? ` --resume ${shellQuote(resumeSessionId)}` : ''} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions ${promptArg}`
                 : resumeSessionId
-                    ? `codex exec resume --json -m ${modelArg} --dangerously-bypass-approvals-and-sandbox ${shellQuote(resumeSessionId)} ${promptArg}`
-                    : `codex exec --json -m ${modelArg} --dangerously-bypass-approvals-and-sandbox ${promptArg}`;
+                    ? `codex exec resume --json -m ${modelArg}${codexReasoningEffortArg} --dangerously-bypass-approvals-and-sandbox ${shellQuote(resumeSessionId)} ${promptArg}`
+                    : `codex exec --json -m ${modelArg}${codexReasoningEffortArg} --dangerously-bypass-approvals-and-sandbox ${promptArg}`;
 
             activeCliRef.current = selection.cli;
             activeModelRef.current = selection.model;
+            activeReasoningEffortRef.current = selection.reasoningEffort;
             const commandResult = await provider.runBackgroundCommand({
                 args: {
                     command: commandText,
@@ -755,6 +768,7 @@ export function useDesktopLocalChat({
                     status: 'error',
                     providerName: activeCliRef.current,
                     model: activeModelRef.current,
+                    reasoningEffort: activeReasoningEffortRef.current,
                     activeTurnId: activeTurnIdRef.current,
                     completedAt: new Date(),
                     lastError: nextError.message,
@@ -792,6 +806,7 @@ export function useDesktopLocalChat({
                 type,
                 provider: selection?.cli ?? 'desktop-local-cli',
                 model: selection?.model ?? null,
+                reasoningEffort: selection?.reasoningEffort ?? null,
             });
 
             const context = await editorEngine.chat.context.getContextByChatType(type);
@@ -865,6 +880,7 @@ export function useDesktopLocalChat({
                 type: chatType,
                 provider: selection?.cli ?? 'desktop-local-cli',
                 model: selection?.model ?? null,
+                reasoningEffort: selection?.reasoningEffort ?? null,
             });
 
             if (isStreaming) {
@@ -917,6 +933,7 @@ export function useDesktopLocalChat({
                     status: 'error',
                     providerName: activeCliRef.current,
                     model: activeModelRef.current,
+                    reasoningEffort: activeReasoningEffortRef.current,
                     activeTurnId: activeTurnIdRef.current,
                     completedAt: new Date(),
                     lastError: nextError.message,
@@ -958,6 +975,7 @@ export function useDesktopLocalChat({
             status: 'interrupted',
             providerName: activeCliRef.current,
             model: activeModelRef.current,
+            reasoningEffort: activeReasoningEffortRef.current,
             activeTurnId: activeTurnIdRef.current,
             completedAt,
             lastError: null,

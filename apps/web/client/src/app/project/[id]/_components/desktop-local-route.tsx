@@ -236,36 +236,13 @@ function DesktopLocalProjectBootstrap({
             return;
         }
 
-        const timeout = window.setTimeout(() => {
-            editorEngine.frames.reloadAllViews();
-        }, 1500);
-
-        return () => {
-            window.clearTimeout(timeout);
-        };
-    }, [editorEngine, isSandboxReady, session.id]);
-
-    useEffect(() => {
-        if (!isSandboxReady) {
-            return;
-        }
-
         const provider = editorEngine.activeSandbox.session.provider;
         if (!provider) {
             return;
         }
 
-        let followUpReloadTimeout: number | null = null;
         const reloadPreview = debounce(() => {
             editorEngine.frames.reloadAllViews();
-            if (followUpReloadTimeout !== null) {
-                window.clearTimeout(followUpReloadTimeout);
-            }
-
-            followUpReloadTimeout = window.setTimeout(() => {
-                editorEngine.frames.reloadAllViews();
-                followUpReloadTimeout = null;
-            }, 1500);
         }, 500);
 
         let disposed = false;
@@ -304,9 +281,6 @@ function DesktopLocalProjectBootstrap({
         return () => {
             disposed = true;
             reloadPreview.cancel();
-            if (followUpReloadTimeout !== null) {
-                window.clearTimeout(followUpReloadTimeout);
-            }
             if (stopWatcher) {
                 void stopWatcher();
             }

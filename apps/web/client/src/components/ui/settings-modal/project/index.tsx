@@ -1,6 +1,7 @@
-
+import { useOptionalDesktopLocalProject } from '@/app/project/[id]/_components/desktop-local-context';
 import { useEditorEngine } from '@/components/store/editor';
 import { api } from '@/trpc/react';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { DefaultSettings } from '@onlook/constants';
 import { toDbProjectSettings } from '@onlook/db';
 import { Button } from '@onlook/ui/button';
@@ -13,23 +14,39 @@ import { useEffect, useMemo, useState } from 'react';
 
 export const ProjectTab = observer(() => {
     const editorEngine = useEditorEngine();
+    const desktopLocalProject = useOptionalDesktopLocalProject();
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
     const utils = api.useUtils();
-    const { data: project } = api.project.get.useQuery({ projectId: editorEngine.projectId });
+    const { data: project } = api.project.get.useQuery(
+        { projectId: editorEngine.projectId },
+        { enabled: !isDesktopLocal },
+    );
     const { mutateAsync: updateProject } = api.project.update.useMutation();
-    const { data: projectSettings } = api.settings.get.useQuery({ projectId: editorEngine.projectId });
+    const { data: projectSettings } = api.settings.get.useQuery(
+        { projectId: editorEngine.projectId },
+        { enabled: !isDesktopLocal },
+    );
     const { mutateAsync: updateProjectSettings } = api.settings.upsert.useMutation();
 
-    const installCommand = projectSettings?.commands?.install ?? DefaultSettings.COMMANDS.install;
-    const runCommand = projectSettings?.commands?.run ?? DefaultSettings.COMMANDS.run;
-    const buildCommand = projectSettings?.commands?.build ?? DefaultSettings.COMMANDS.build;
-    const name = project?.name ?? '';
+    const installCommand = isDesktopLocal
+        ? desktopLocalProject?.session.installCommand ?? DefaultSettings.COMMANDS.install
+        : projectSettings?.commands?.install ?? DefaultSettings.COMMANDS.install;
+    const runCommand = isDesktopLocal
+        ? desktopLocalProject?.session.devCommand ?? DefaultSettings.COMMANDS.run
+        : projectSettings?.commands?.run ?? DefaultSettings.COMMANDS.run;
+    const buildCommand = isDesktopLocal
+        ? desktopLocalProject?.session.buildCommand ?? DefaultSettings.COMMANDS.build
+        : projectSettings?.commands?.build ?? DefaultSettings.COMMANDS.build;
+    const name = isDesktopLocal
+        ? desktopLocalProject?.session.name ?? ''
+        : project?.name ?? '';
 
     // Form state
     const [formData, setFormData] = useState({
         name: '',
         install: '',
         run: '',
-        build: ''
+        build: '',
     });
     const [isSaving, setIsSaving] = useState(false);
 
@@ -39,7 +56,7 @@ export const ProjectTab = observer(() => {
             name,
             install: installCommand,
             run: runCommand,
-            build: buildCommand
+            build: buildCommand,
         });
     }, [name, installCommand, runCommand, buildCommand]);
 
@@ -54,6 +71,10 @@ export const ProjectTab = observer(() => {
     }, [formData, name, installCommand, runCommand, buildCommand]);
 
     const handleSave = async () => {
+        if (isDesktopLocal) {
+            return;
+        }
+
         setIsSaving(true);
         try {
             // Update project name if changed
@@ -70,7 +91,11 @@ export const ProjectTab = observer(() => {
             }
 
             // Update commands if any changed
-            if (formData.install !== installCommand || formData.run !== runCommand || formData.build !== buildCommand) {
+            if (
+                formData.install !== installCommand
+                || formData.run !== runCommand
+                || formData.build !== buildCommand
+            ) {
                 await updateProjectSettings({
                     projectId: editorEngine.projectId,
                     settings: toDbProjectSettings(editorEngine.projectId, {
@@ -97,12 +122,12 @@ export const ProjectTab = observer(() => {
             name,
             install: installCommand,
             run: runCommand,
-            build: buildCommand
+            build: buildCommand,
         });
     };
 
     const updateField = (field: keyof typeof formData, value: string) => {
-        setFormData(prev => ({ ...prev, [field]: value }));
+        setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
     return (
@@ -110,6 +135,12 @@ export const ProjectTab = observer(() => {
             <div className="flex flex-col gap-4 p-6 pb-24 overflow-y-auto flex-1">
                 <div className="flex flex-col gap-4">
                     <h2 className="text-lg">Metadata</h2>
+                    {isDesktopLocal && (
+                        <p className="text-small text-foreground-secondary">
+                            These values are detected from your local project and are
+                            read-only in desktop mode.
+                        </p>
+                    )}
                     <div className="space-y-4">
                         <div className="flex justify-between items-center">
                             <p className="text-muted-foreground">Name</p>
@@ -118,7 +149,7 @@ export const ProjectTab = observer(() => {
                                 value={formData.name}
                                 onChange={(e) => updateField('name', e.target.value)}
                                 className="w-2/3"
-                                disabled={isSaving}
+                                disabled={isSaving || isDesktopLocal}
                             />
                         </div>
                     </div>
@@ -140,7 +171,7 @@ export const ProjectTab = observer(() => {
                                 value={formData.install}
                                 onChange={(e) => updateField('install', e.target.value)}
                                 className="w-2/3"
-                                disabled={isSaving}
+                                disabled={isSaving || isDesktopLocal}
                             />
                         </div>
                         <div className="flex justify-between items-center">
@@ -150,7 +181,7 @@ export const ProjectTab = observer(() => {
                                 value={formData.run}
                                 onChange={(e) => updateField('run', e.target.value)}
                                 className="w-2/3"
-                                disabled={isSaving}
+                                disabled={isSaving || isDesktopLocal}
                             />
                         </div>
                         <div className="flex justify-between items-center">
@@ -160,37 +191,41 @@ export const ProjectTab = observer(() => {
                                 value={formData.build}
                                 onChange={(e) => updateField('build', e.target.value)}
                                 className="w-2/3"
-                                disabled={isSaving}
+                                disabled={isSaving || isDesktopLocal}
                             />
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Save/Discard buttons matching site tab pattern */}
-            <div className="sticky bottom-0 bg-background border-t border-border/50 p-6" style={{ borderTopWidth: '0.5px' }}>
-                <div className="flex justify-end gap-4">
-                    <Button
-                        variant="outline"
-                        className="flex items-center gap-2 px-4 py-2 bg-background border border-border/50"
-                        type="button"
-                        onClick={handleDiscard}
-                        disabled={!isDirty || isSaving}
-                    >
-                        <span>Discard changes</span>
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        className="flex items-center gap-2 px-4 py-2"
-                        type="button"
-                        onClick={handleSave}
-                        disabled={!isDirty || isSaving}
-                    >
-                        {isSaving && <Icons.LoadingSpinner className="h-4 w-4 animate-spin" />}
-                        <span>{isSaving ? 'Saving...' : 'Save changes'}</span>
-                    </Button>
+            {!isDesktopLocal && (
+                <div
+                    className="sticky bottom-0 bg-background border-t border-border/50 p-6"
+                    style={{ borderTopWidth: '0.5px' }}
+                >
+                    <div className="flex justify-end gap-4">
+                        <Button
+                            variant="outline"
+                            className="flex items-center gap-2 px-4 py-2 bg-background border border-border/50"
+                            type="button"
+                            onClick={handleDiscard}
+                            disabled={!isDirty || isSaving}
+                        >
+                            <span>Discard changes</span>
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            className="flex items-center gap-2 px-4 py-2"
+                            type="button"
+                            onClick={handleSave}
+                            disabled={!isDirty || isSaving}
+                        >
+                            {isSaving && <Icons.LoadingSpinner className="h-4 w-4 animate-spin" />}
+                            <span>{isSaving ? 'Saving...' : 'Save changes'}</span>
+                        </Button>
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 });

@@ -1,5 +1,7 @@
+import { useOptionalDesktopLocalProject } from '@/app/project/[id]/_components/desktop-local-context';
 import { useEditorEngine } from '@/components/store/editor';
 import { api } from '@/trpc/react';
+import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { DefaultSettings } from '@onlook/constants';
 import { type PageMetadata } from '@onlook/models';
 import { Icons } from '@onlook/ui/icons';
@@ -11,9 +13,17 @@ import { useMetadataForm } from './use-metadata-form';
 
 export const PageTab = ({ metadata, path }: { metadata?: PageMetadata; path: string }) => {
     const editorEngine = useEditorEngine();
-    const { data: project } = api.project.get.useQuery({ projectId: editorEngine.projectId });
-    const { data: domains } = api.domain.getAll.useQuery({ projectId: editorEngine.projectId });
-    const baseUrl = domains?.published?.url ?? domains?.preview?.url;
+    const desktopLocalProject = useOptionalDesktopLocalProject();
+    const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
+    const { data: domains } = api.domain.getAll.useQuery(
+        { projectId: editorEngine.projectId },
+        { enabled: !isDesktopLocal },
+    );
+    const baseUrl =
+        desktopLocalProject?.session.previewUrl
+        ?? domains?.published?.url
+        ?? domains?.preview?.url
+        ?? '';
 
     const {
         title,
@@ -37,9 +47,6 @@ export const PageTab = ({ metadata, path }: { metadata?: PageMetadata; path: str
     const [isSaving, setIsSaving] = useState(false);
 
     const handleSave = async () => {
-        if (!project) {
-            return;
-        }
         setIsSaving(true);
         try {
             const url = createSecureUrl(baseUrl);

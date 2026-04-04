@@ -2,12 +2,16 @@
 
 import { useEditorEngine } from '@/components/store/editor';
 import {
+    type DesktopLocalChatCodexReasoningEffort,
     DESKTOP_LOCAL_CHAT_PROVIDER_LABELS,
+    getDesktopLocalChatCodexReasoningEffortLabel,
+    getDesktopLocalChatCodexReasoningEffortOptions,
     getDesktopLocalChatPickerState,
     getDesktopLocalChatModelLabel,
     getDesktopLocalChatModelOptions,
     setDesktopLocalChatSelection,
     type DesktopLocalChatCli,
+    type DesktopLocalChatModelSelection,
 } from '@/utils/desktop-local-chat';
 import { Button } from '@onlook/ui/button';
 import {
@@ -29,7 +33,7 @@ import { toast } from '@onlook/ui/sonner';
 import { cn } from '@onlook/ui/utils';
 import { useTranslations } from 'next-intl';
 import type { SVGProps } from 'react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface ModelSelectorProps {
     conversationId: string;
@@ -43,6 +47,8 @@ const MODEL_I18N_KEYS = {
     loadFailed: 'editor.panels.edit.tabs.chat.model.loadFailed',
     updateFailed: 'editor.panels.edit.tabs.chat.model.updateFailed',
 } as const;
+
+const DEFAULT_REASONING_EFFORT_VALUE = '__default_reasoning_effort__';
 
 type ProviderLogoProps = SVGProps<SVGSVGElement>;
 
@@ -81,20 +87,29 @@ export function DesktopLocalChatModelSelector({
     const editorEngine = useEditorEngine();
     const t = useTranslations();
     const [availableClis, setAvailableClis] = useState<DesktopLocalChatCli[]>([]);
-    const [selection, setSelection] = useState<{
-        cli: DesktopLocalChatCli;
-        model: string;
-    } | null>(null);
+    const [selection, setSelection] = useState<DesktopLocalChatModelSelection | null>(null);
     const [lockedProvider, setLockedProvider] = useState<DesktopLocalChatCli | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
+    const [isEffortOpen, setIsEffortOpen] = useState(false);
+
+    const loadPickerState = useCallback(async () => {
+        setIsLoading(true);
+        const nextState = await getDesktopLocalChatPickerState(
+            editorEngine.projectId,
+            conversationId,
+        );
+        setAvailableClis(nextState.availableClis);
+        setSelection(nextState.selection);
+        setLockedProvider(nextState.lockedProvider);
+        setIsLoading(false);
+    }, [conversationId, editorEngine.projectId]);
 
     useEffect(() => {
         let cancelled = false;
 
         const load = async () => {
             try {
-                setIsLoading(true);
                 const nextState = await getDesktopLocalChatPickerState(
                     editorEngine.projectId,
                     conversationId,
@@ -138,16 +153,37 @@ export function DesktopLocalChatModelSelector({
                     conversationId,
                 },
             );
-            const nextState = await getDesktopLocalChatPickerState(
-                editorEngine.projectId,
-                conversationId,
-            );
-            setAvailableClis(nextState.availableClis);
-            setSelection(nextState.selection);
-            setLockedProvider(nextState.lockedProvider);
+            await loadPickerState();
             setIsOpen(false);
         } catch (error) {
             console.error('Failed to update desktop-local chat model selection', error);
+            toast.error(t(MODEL_I18N_KEYS.updateFailed as never));
+        }
+    };
+
+    const handleReasoningEffortSelect = async (
+        reasoningEffort: DesktopLocalChatCodexReasoningEffort | null,
+    ) => {
+        if (!selection || selection.cli !== 'codex') {
+            return;
+        }
+
+        try {
+            await setDesktopLocalChatSelection(
+                editorEngine.projectId,
+                {
+                    cli: selection.cli,
+                    model: selection.model,
+                    reasoningEffort,
+                },
+                {
+                    conversationId,
+                },
+            );
+            await loadPickerState();
+            setIsEffortOpen(false);
+        } catch (error) {
+            console.error('Failed to update desktop-local chat reasoning effort', error);
             toast.error(t(MODEL_I18N_KEYS.updateFailed as never));
         }
     };
@@ -158,129 +194,183 @@ export function DesktopLocalChatModelSelector({
         : isLoading
             ? t(MODEL_I18N_KEYS.loading as never)
             : t(MODEL_I18N_KEYS.unavailable as never);
+    const effortTriggerLabel = selection?.cli === 'codex'
+        ? getDesktopLocalChatCodexReasoningEffortLabel(selection.reasoningEffort)
+        : null;
 
     const isDisabled = disabled || isLoading || (availableClis.length === 0 && !selection);
+    const isEffortDisabled = disabled || isLoading || selection?.cli !== 'codex';
     const providerOrder = Object.keys(
         DESKTOP_LOCAL_CHAT_PROVIDER_LABELS,
     ) as DesktopLocalChatCli[];
     const ActiveProviderLogo = activeProvider ? PROVIDER_LOGOS[activeProvider] : null;
 
     return (
-        <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
-            <DropdownMenuTrigger asChild>
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={isDisabled}
-                    className={cn(
-                        'h-8 max-w-[180px] min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-foreground-onlook',
-                        isDisabled && 'opacity-50 cursor-not-allowed',
-                    )}
-                >
-                    <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
-                        {ActiveProviderLogo ? (
-                            <ActiveProviderLogo
-                                className={cn(
-                                    'h-4 w-4 shrink-0',
-                                    providerLogoClassName(
-                                        activeProvider!,
-                                        'text-foreground-secondary',
-                                    ),
-                                )}
-                            />
-                        ) : (
-                            <Icons.Sparkles className="h-4 w-4 shrink-0 text-foreground-secondary" />
+        <>
+            <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+                <DropdownMenuTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={isDisabled}
+                        className={cn(
+                            'h-8 max-w-[180px] min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-foreground-onlook',
+                            isDisabled && 'opacity-50 cursor-not-allowed',
                         )}
-                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                            {triggerLabel}
-                        </span>
-                        {lockedProvider ? (
-                            <Icons.LockClosed className="h-3 w-3 shrink-0 text-foreground-tertiary" />
-                        ) : null}
-                        <Icons.ChevronDown className="h-3 w-3 shrink-0 text-foreground-tertiary" />
-                    </span>
-                </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-[220px]">
-                <DropdownMenuLabel className="text-xs text-foreground-secondary">
-                    {t(MODEL_I18N_KEYS.label as never)}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {lockedProvider ? (
-                    <>
-                        <DropdownMenuItem disabled className="cursor-default">
-                            <span className="flex items-center gap-2">
-                                <ProviderLogo
-                                    cli={lockedProvider}
-                                    className="h-4 w-4 shrink-0"
+                    >
+                        <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
+                            {ActiveProviderLogo ? (
+                                <ActiveProviderLogo
+                                    className={cn(
+                                        'h-4 w-4 shrink-0',
+                                        providerLogoClassName(
+                                            activeProvider!,
+                                            'text-foreground-secondary',
+                                        ),
+                                    )}
                                 />
-                                <span>{DESKTOP_LOCAL_CHAT_PROVIDER_LABELS[lockedProvider]}</span>
+                            ) : (
+                                <Icons.Sparkles className="h-4 w-4 shrink-0 text-foreground-secondary" />
+                            )}
+                            <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                                {triggerLabel}
                             </span>
-                            <DropdownMenuShortcut>Locked</DropdownMenuShortcut>
-                        </DropdownMenuItem>
+                            {lockedProvider ? (
+                                <Icons.LockClosed className="h-3 w-3 shrink-0 text-foreground-tertiary" />
+                            ) : null}
+                            <Icons.ChevronDown className="h-3 w-3 shrink-0 text-foreground-tertiary" />
+                        </span>
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[220px]">
+                    <DropdownMenuLabel className="text-xs text-foreground-secondary">
+                        {t(MODEL_I18N_KEYS.label as never)}
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {lockedProvider ? (
+                        <>
+                            <DropdownMenuItem disabled className="cursor-default">
+                                <span className="flex items-center gap-2">
+                                    <ProviderLogo
+                                        cli={lockedProvider}
+                                        className="h-4 w-4 shrink-0"
+                                    />
+                                    <span>{DESKTOP_LOCAL_CHAT_PROVIDER_LABELS[lockedProvider]}</span>
+                                </span>
+                                <DropdownMenuShortcut>Locked</DropdownMenuShortcut>
+                            </DropdownMenuItem>
+                            <DropdownMenuRadioGroup
+                                value={selection?.cli === lockedProvider ? selection.model : undefined}
+                                onValueChange={(value) => {
+                                    void handleSelect(lockedProvider, value);
+                                }}
+                            >
+                                {getDesktopLocalChatModelOptions(lockedProvider).map((option) => (
+                                    <DropdownMenuRadioItem
+                                        key={option.value}
+                                        value={option.value}
+                                        disabled={!availableClis.includes(lockedProvider)}
+                                    >
+                                        {option.label}
+                                    </DropdownMenuRadioItem>
+                                ))}
+                            </DropdownMenuRadioGroup>
+                        </>
+                    ) : (
+                        providerOrder.map((cli) => {
+                            const isAvailable = availableClis.includes(cli);
+                            const isSelectedProvider = selection?.cli === cli;
+                            return (
+                                isAvailable ? (
+                                    <DropdownMenuSub key={cli}>
+                                        <DropdownMenuSubTrigger>
+                                            <ProviderLogo cli={cli} className="h-4 w-4 shrink-0" />
+                                            <span>{DESKTOP_LOCAL_CHAT_PROVIDER_LABELS[cli]}</span>
+                                            {isSelectedProvider ? (
+                                                <DropdownMenuShortcut>
+                                                    {getDesktopLocalChatModelLabel(cli, selection.model)}
+                                                </DropdownMenuShortcut>
+                                            ) : null}
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuSubContent>
+                                            <DropdownMenuRadioGroup
+                                                value={isSelectedProvider ? selection.model : undefined}
+                                                onValueChange={(value) => {
+                                                    void handleSelect(cli, value);
+                                                }}
+                                            >
+                                                {getDesktopLocalChatModelOptions(cli).map((option) => (
+                                                    <DropdownMenuRadioItem
+                                                        key={option.value}
+                                                        value={option.value}
+                                                    >
+                                                        {option.label}
+                                                    </DropdownMenuRadioItem>
+                                                ))}
+                                            </DropdownMenuRadioGroup>
+                                        </DropdownMenuSubContent>
+                                    </DropdownMenuSub>
+                                ) : (
+                                    <DropdownMenuItem key={cli} disabled>
+                                        <ProviderLogo cli={cli} className="h-4 w-4 shrink-0 opacity-80" />
+                                        <span>{DESKTOP_LOCAL_CHAT_PROVIDER_LABELS[cli]}</span>
+                                        <DropdownMenuShortcut>Unavailable</DropdownMenuShortcut>
+                                    </DropdownMenuItem>
+                                )
+                            );
+                        })
+                    )}
+                </DropdownMenuContent>
+            </DropdownMenu>
+            {selection?.cli === 'codex' ? (
+                <DropdownMenu open={isEffortOpen} onOpenChange={setIsEffortOpen}>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={isEffortDisabled}
+                            title="Reasoning effort"
+                            className={cn(
+                                'h-8 max-w-[120px] min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-foreground-onlook',
+                                isEffortDisabled && 'opacity-50 cursor-not-allowed',
+                            )}
+                        >
+                            <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
+                                <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                                    {effortTriggerLabel}
+                                </span>
+                                <Icons.ChevronDown className="h-3 w-3 shrink-0 text-foreground-tertiary" />
+                            </span>
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="min-w-[180px]">
+                        <DropdownMenuLabel className="text-xs text-foreground-secondary">
+                            Effort
+                        </DropdownMenuLabel>
+                        <DropdownMenuSeparator />
                         <DropdownMenuRadioGroup
-                            value={selection?.cli === lockedProvider ? selection.model : undefined}
+                            value={selection.reasoningEffort ?? DEFAULT_REASONING_EFFORT_VALUE}
                             onValueChange={(value) => {
-                                void handleSelect(lockedProvider, value);
+                                void handleReasoningEffortSelect(
+                                    value === DEFAULT_REASONING_EFFORT_VALUE
+                                        ? null
+                                        : value as DesktopLocalChatCodexReasoningEffort,
+                                );
                             }}
                         >
-                            {getDesktopLocalChatModelOptions(lockedProvider).map((option) => (
-                                <DropdownMenuRadioItem
-                                    key={option.value}
-                                    value={option.value}
-                                    disabled={!availableClis.includes(lockedProvider)}
-                                >
+                            <DropdownMenuRadioItem value={DEFAULT_REASONING_EFFORT_VALUE}>
+                                Default
+                            </DropdownMenuRadioItem>
+                            {getDesktopLocalChatCodexReasoningEffortOptions().map((option) => (
+                                <DropdownMenuRadioItem key={option.value} value={option.value}>
                                     {option.label}
                                 </DropdownMenuRadioItem>
                             ))}
                         </DropdownMenuRadioGroup>
-                    </>
-                ) : (
-                    providerOrder.map((cli) => {
-                        const isAvailable = availableClis.includes(cli);
-                        const isSelectedProvider = selection?.cli === cli;
-                        return (
-                            isAvailable ? (
-                                <DropdownMenuSub key={cli}>
-                                    <DropdownMenuSubTrigger>
-                                        <ProviderLogo cli={cli} className="h-4 w-4 shrink-0" />
-                                        <span>{DESKTOP_LOCAL_CHAT_PROVIDER_LABELS[cli]}</span>
-                                        {isSelectedProvider ? (
-                                            <DropdownMenuShortcut>
-                                                {getDesktopLocalChatModelLabel(cli, selection.model)}
-                                            </DropdownMenuShortcut>
-                                        ) : null}
-                                    </DropdownMenuSubTrigger>
-                                    <DropdownMenuSubContent>
-                                        <DropdownMenuRadioGroup
-                                            value={isSelectedProvider ? selection.model : undefined}
-                                            onValueChange={(value) => {
-                                                void handleSelect(cli, value);
-                                            }}
-                                        >
-                                            {getDesktopLocalChatModelOptions(cli).map((option) => (
-                                                <DropdownMenuRadioItem
-                                                    key={option.value}
-                                                    value={option.value}
-                                                >
-                                                    {option.label}
-                                                </DropdownMenuRadioItem>
-                                            ))}
-                                        </DropdownMenuRadioGroup>
-                                    </DropdownMenuSubContent>
-                                </DropdownMenuSub>
-                            ) : (
-                                <DropdownMenuItem key={cli} disabled>
-                                    <ProviderLogo cli={cli} className="h-4 w-4 shrink-0 opacity-80" />
-                                    <span>{DESKTOP_LOCAL_CHAT_PROVIDER_LABELS[cli]}</span>
-                                    <DropdownMenuShortcut>Unavailable</DropdownMenuShortcut>
-                                </DropdownMenuItem>
-                            )
-                        );
-                    })
-                )}
-            </DropdownMenuContent>
-        </DropdownMenu>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            ) : null}
+        </>
     );
 }
 
