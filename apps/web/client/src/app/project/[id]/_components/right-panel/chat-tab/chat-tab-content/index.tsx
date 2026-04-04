@@ -14,8 +14,10 @@ interface ChatTabContentProps {
 
 function ChatTabBody({
     chatState,
+    conversationId,
 }: {
     chatState: ReturnType<typeof useChat>;
+    conversationId: string;
 }) {
     const {
         isStreaming,
@@ -38,6 +40,7 @@ function ChatTabBody({
             />
             <ErrorSection isStreaming={isStreaming} onSendMessage={sendMessage} />
             <ChatInput
+                conversationId={conversationId}
                 messages={messages}
                 isStreaming={isStreaming}
                 onStop={stop}
@@ -60,7 +63,7 @@ function HostedChatTabContent({
         initialMessages,
     });
 
-    return <ChatTabBody chatState={chatState} />;
+    return <ChatTabBody chatState={chatState} conversationId={conversationId} />;
 }
 
 function DesktopLocalChatTabContent({
@@ -74,7 +77,7 @@ function DesktopLocalChatTabContent({
         initialMessages,
     });
 
-    return <ChatTabBody chatState={chatState} />;
+    return <ChatTabBody chatState={chatState} conversationId={conversationId} />;
 }
 
 export const ChatTabContent = (props: ChatTabContentProps) => {

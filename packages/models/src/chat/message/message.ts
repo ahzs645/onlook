@@ -8,6 +8,9 @@ export type ChatMetadata = {
     conversationId: string;
     context: MessageContext[];
     checkpoints: MessageCheckpoints[];
+    turnId?: string;
+    streaming?: boolean;
+    completedAt?: Date;
     finishReason?: FinishReason;
     usage?: LanguageModelUsage;
     error?: string;

@@ -45,7 +45,16 @@ export async function createCheckpointsForAllBranches(
             continue;
         }
 
-        const result = await branchData.sandbox.gitManager.createCommit(commitMessage);
+        let result: Awaited<ReturnType<typeof branchData.sandbox.gitManager.createCommit>>;
+        try {
+            result = await branchData.sandbox.gitManager.createCommit(commitMessage);
+        } catch (error) {
+            console.error(
+                `Failed to create chat checkpoint for branch ${branch.id}:`,
+                error,
+            );
+            continue;
+        }
 
         if (result.success) {
             const commits = branchData.sandbox.gitManager.commits;

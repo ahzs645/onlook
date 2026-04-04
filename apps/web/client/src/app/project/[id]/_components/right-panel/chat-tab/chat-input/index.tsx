@@ -32,6 +32,7 @@ import { DesktopLocalChatModelSelector } from './model-selector';
 import { QueueItems } from './queue-items';
 
 interface ChatInputProps {
+    conversationId: string;
     messages: ChatMessage[];
     isStreaming: boolean;
     onStop: () => Promise<void>;
@@ -49,6 +50,7 @@ const imageDragDataSchema = z.object({
 
 export const ChatInput = observer(
     ({
+        conversationId,
         messages,
         isStreaming,
         onStop,
@@ -439,7 +441,10 @@ export const ChatInput = observer(
                             onChatModeChange={handleChatModeChange}
                         />
                         {isDesktopLocal && (
-                            <DesktopLocalChatModelSelector disabled={isStreaming} />
+                            <DesktopLocalChatModelSelector
+                                conversationId={conversationId}
+                                disabled={isStreaming}
+                            />
                         )}
                         {lastUsageMessage?.metadata?.usage && (
                             <ChatContextWindow usage={lastUsageMessage?.metadata?.usage} />

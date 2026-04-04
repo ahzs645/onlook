@@ -2,10 +2,12 @@
 
 import { useEditorEngine } from '@/components/store/editor';
 import {
-    getDesktopLocalConversation,
+    getDesktopLocalChatPickerState,
     getDesktopLocalChatSelection,
     replaceDesktopLocalConversationMessages,
-    setDesktopLocalConversationCliSession,
+    setDesktopLocalChatSelection,
+    updateDesktopLocalConversationSession,
+    type DesktopLocalChatSessionStatus,
     type DesktopLocalChatCli,
 } from '@/utils/desktop-local-chat';
 import {
@@ -77,6 +79,8 @@ type CodexEvent = {
     message?: string;
 };
 
+type MessageFinishReason = NonNullable<ChatMessage['metadata']>['finishReason'];
+
 function shellQuote(value: string) {
     return JSON.stringify(value);
 }
@@ -123,6 +127,37 @@ function getCodexErrorMessage(event: CodexEvent): string | null {
     }
 
     return null;
+}
+
+function normalizeFinishReason(reason: string): MessageFinishReason {
+    switch (reason) {
+        case 'stop':
+        case 'end_turn':
+            return 'stop';
+        case 'length':
+            return 'length';
+        case 'tool-calls':
+            return 'tool-calls';
+        case 'content-filter':
+            return 'content-filter';
+        default:
+            return undefined;
+    }
+}
+
+function getSessionStatusForReason(
+    reason: string,
+    hasError: boolean,
+): DesktopLocalChatSessionStatus {
+    if (hasError) {
+        return 'error';
+    }
+
+    if (reason === 'stop') {
+        return 'interrupted';
+    }
+
+    return 'completed';
 }
 
 function buildDesktopLocalPrompt(input: {
@@ -226,6 +261,8 @@ export function useDesktopLocalChat({
     const activeAssistantMessageIdRef = useRef<string | null>(null);
     const activeCliRef = useRef<DesktopLocalChatCli | null>(null);
     const activeModelRef = useRef<string | null>(null);
+    const activeTurnIdRef = useRef<string | null>(null);
+    const activeTurnStartedAtRef = useRef<Date | null>(null);
 
     useEffect(() => {
         setMessages(initialMessages);
@@ -243,21 +280,36 @@ export function useDesktopLocalChat({
         [conversationId, projectId],
     );
 
+    const persistSessionState = useCallback(
+        async (
+            updates: Parameters<typeof updateDesktopLocalConversationSession>[2],
+        ) => {
+            await updateDesktopLocalConversationSession(projectId, conversationId, updates);
+        },
+        [conversationId, projectId],
+    );
+
     const applyMessages = useCallback(
         (updater: (current: ChatMessage[]) => ChatMessage[]) => {
-            let nextMessages: ChatMessage[] = [];
-            setMessages((current) => {
-                nextMessages = jsonClone(updater(current));
-                messagesRef.current = nextMessages;
-                return nextMessages;
-            });
+            const nextMessages = jsonClone(updater(messagesRef.current));
+            messagesRef.current = nextMessages;
+            setMessages(nextMessages);
             return nextMessages;
         },
         [],
     );
 
     const upsertAssistantMessage = useCallback(
-        (content: string, mode: 'replace' | 'append') => {
+        (
+            content: string,
+            mode: 'replace' | 'append',
+            options?: {
+                streaming?: boolean;
+                completedAt?: Date;
+                finishReason?: MessageFinishReason;
+                error?: string;
+            },
+        ) => {
             applyMessages((currentMessages) => {
                 const existingId = activeAssistantMessageIdRef.current;
                 let existingIndex = existingId
@@ -286,6 +338,11 @@ export function useDesktopLocalChat({
                                 checkpoints: [],
                                 createdAt: new Date(),
                                 conversationId,
+                                turnId: activeTurnIdRef.current ?? undefined,
+                                streaming: options?.streaming,
+                                completedAt: options?.completedAt,
+                                finishReason: options?.finishReason,
+                                error: options?.error,
                             },
                         },
                     ];
@@ -301,11 +358,60 @@ export function useDesktopLocalChat({
                 const nextMessage: ChatMessage = {
                     ...existingMessage,
                     parts: [{ type: 'text', text: nextText }],
+                    metadata: {
+                        ...existingMessage.metadata,
+                        createdAt: existingMessage.metadata?.createdAt ?? new Date(),
+                        conversationId,
+                        checkpoints: existingMessage.metadata?.checkpoints ?? [],
+                        context: existingMessage.metadata?.context ?? [],
+                        turnId: activeTurnIdRef.current ?? existingMessage.metadata?.turnId,
+                        streaming: options?.streaming ?? existingMessage.metadata?.streaming,
+                        completedAt: options?.completedAt ?? existingMessage.metadata?.completedAt,
+                        finishReason: options?.finishReason ?? existingMessage.metadata?.finishReason,
+                        error: options?.error ?? existingMessage.metadata?.error,
+                    },
                 };
 
                 return currentMessages.map((message, index) =>
                     index === existingIndex ? nextMessage : message,
                 );
+            });
+        },
+        [applyMessages, conversationId],
+    );
+
+    const finalizeAssistantMessage = useCallback(
+        (
+            reason: string,
+            nextError?: Error,
+        ) => {
+            applyMessages((currentMessages) => {
+                const assistantMessageId = activeAssistantMessageIdRef.current;
+                if (!assistantMessageId) {
+                    return currentMessages;
+                }
+
+                return currentMessages.map((message) => {
+                    if (message.id !== assistantMessageId) {
+                        return message;
+                    }
+
+                    return {
+                        ...message,
+                        metadata: {
+                            ...message.metadata,
+                            createdAt: message.metadata?.createdAt ?? new Date(),
+                            conversationId,
+                            checkpoints: message.metadata?.checkpoints ?? [],
+                            context: message.metadata?.context ?? [],
+                            turnId: activeTurnIdRef.current ?? message.metadata?.turnId,
+                            streaming: false,
+                            completedAt: new Date(),
+                            finishReason: normalizeFinishReason(reason),
+                            error: nextError?.message ?? message.metadata?.error,
+                        },
+                    };
+                });
             });
         },
         [applyMessages, conversationId],
@@ -323,13 +429,25 @@ export function useDesktopLocalChat({
 
     const finalizeCommand = useCallback(
         (reason: string, nextError?: Error) => {
+            const completedAt = new Date();
+            const nextStatus = getSessionStatusForReason(reason, !!nextError);
+            finalizeAssistantMessage(reason, nextError);
+            void persistSessionState({
+                status: nextStatus,
+                providerName: activeCliRef.current,
+                model: activeModelRef.current,
+                activeTurnId: activeTurnIdRef.current,
+                completedAt,
+                lastError: nextError?.message ?? null,
+                updatedAt: completedAt,
+            });
             setError(nextError);
             setFinishReason(reason);
             setIsStreaming(false);
             setStatus('ready');
             clearActiveCommand();
         },
-        [clearActiveCommand],
+        [clearActiveCommand, finalizeAssistantMessage, persistSessionState],
     );
 
     const processClaudeEvent = useCallback(
@@ -337,13 +455,17 @@ export function useDesktopLocalChat({
             switch (event.type) {
                 case 'system':
                     if (event.subtype === 'init' && event.session_id) {
-                        void setDesktopLocalConversationCliSession(
-                            projectId,
-                            conversationId,
-                            'claude',
-                            event.session_id,
-                            activeModelRef.current,
-                        );
+                        setStatus('streaming');
+                        void persistSessionState({
+                            status: 'running',
+                            providerName: 'claude',
+                            model: activeModelRef.current,
+                            sessionId: event.session_id,
+                            activeTurnId: activeTurnIdRef.current,
+                            startedAt: activeTurnStartedAtRef.current,
+                            lastError: null,
+                            updatedAt: new Date(),
+                        });
                     }
                     return;
                 case 'assistant': {
@@ -352,7 +474,10 @@ export function useDesktopLocalChat({
                         .map((part) => part.text ?? '')
                         .join('');
                     if (text) {
-                        upsertAssistantMessage(text, 'replace');
+                        setStatus('streaming');
+                        upsertAssistantMessage(text, 'replace', {
+                            streaming: true,
+                        });
                     }
                     return;
                 }
@@ -363,19 +488,25 @@ export function useDesktopLocalChat({
                         streamEvent.delta?.type === 'text_delta' &&
                         streamEvent.delta.text
                     ) {
-                        upsertAssistantMessage(streamEvent.delta.text, 'append');
+                        setStatus('streaming');
+                        upsertAssistantMessage(streamEvent.delta.text, 'append', {
+                            streaming: true,
+                        });
                     }
                     return;
                 }
                 case 'result':
                     if (event.session_id) {
-                        void setDesktopLocalConversationCliSession(
-                            projectId,
-                            conversationId,
-                            'claude',
-                            event.session_id,
-                            activeModelRef.current,
-                        );
+                        void persistSessionState({
+                            status: 'running',
+                            providerName: 'claude',
+                            model: activeModelRef.current,
+                            sessionId: event.session_id,
+                            activeTurnId: activeTurnIdRef.current,
+                            startedAt: activeTurnStartedAtRef.current,
+                            lastError: null,
+                            updatedAt: new Date(),
+                        });
                     }
 
                     if (event.is_error) {
@@ -383,14 +514,18 @@ export function useDesktopLocalChat({
                         finalizeCommand('error', new Error(message || 'Desktop local chat failed'));
                     } else {
                         if (event.result) {
-                            upsertAssistantMessage(event.result, 'replace');
+                            upsertAssistantMessage(event.result, 'replace', {
+                                streaming: false,
+                                completedAt: new Date(),
+                                finishReason: normalizeFinishReason(event.stop_reason ?? 'stop'),
+                            });
                         }
                         finalizeCommand(event.stop_reason ?? 'end_turn');
                     }
                     return;
             }
         },
-        [conversationId, finalizeCommand, projectId, upsertAssistantMessage],
+        [finalizeCommand, persistSessionState, upsertAssistantMessage],
     );
 
     const processCodexEvent = useCallback(
@@ -398,26 +533,36 @@ export function useDesktopLocalChat({
             switch (event.type) {
                 case 'thread.started':
                     if (event.thread_id) {
-                        void setDesktopLocalConversationCliSession(
-                            projectId,
-                            conversationId,
-                            'codex',
-                            event.thread_id,
-                            activeModelRef.current,
-                        );
+                        setStatus('streaming');
+                        void persistSessionState({
+                            status: 'running',
+                            providerName: 'codex',
+                            model: activeModelRef.current,
+                            sessionId: event.thread_id,
+                            activeTurnId: activeTurnIdRef.current,
+                            startedAt: activeTurnStartedAtRef.current,
+                            lastError: null,
+                            updatedAt: new Date(),
+                        });
                     }
                     return;
                 case 'item.delta': {
                     const text = extractCodexEventText(event);
                     if (text) {
-                        upsertAssistantMessage(text, 'append');
+                        setStatus('streaming');
+                        upsertAssistantMessage(text, 'append', {
+                            streaming: true,
+                        });
                     }
                     return;
                 }
                 case 'item.completed': {
                     const text = extractCodexEventText(event);
                     if (text) {
-                        upsertAssistantMessage(text, 'replace');
+                        setStatus('streaming');
+                        upsertAssistantMessage(text, 'replace', {
+                            streaming: true,
+                        });
                     }
                     return;
                 }
@@ -442,7 +587,7 @@ export function useDesktopLocalChat({
                 }
             }
         },
-        [conversationId, finalizeCommand, projectId, upsertAssistantMessage],
+        [finalizeCommand, persistSessionState, upsertAssistantMessage],
     );
 
     const processOutputChunk = useCallback(
@@ -492,28 +637,47 @@ export function useDesktopLocalChat({
             type: ChatType;
             resetSession?: boolean;
         }) => {
-            const selection = await getDesktopLocalChatSelection(projectId);
+            const pickerState = await getDesktopLocalChatPickerState(projectId, conversationId);
+            const selection = pickerState.selection;
             if (!selection) {
                 throw new Error(
                     'No supported local AI CLI was found. Install Claude (`claude`) or Codex (`codex`) to use desktop-local chat.',
                 );
             }
+            const provider = editorEngine.activeSandbox.session.provider;
+            if (!provider) {
+                throw new Error('Desktop local sandbox provider is not ready');
+            }
 
-            const conversation = await getDesktopLocalConversation(projectId, conversationId);
-            const shouldResume = !resetSession
-                && !!conversation?.cliSessionId
-                && conversation.cliType === selection.cli
-                && conversation.cliModel === selection.model;
-
-            if (!shouldResume) {
-                await setDesktopLocalConversationCliSession(
-                    projectId,
-                    conversationId,
-                    selection.cli,
-                    null,
-                    selection.model,
+            if (!pickerState.availableClis.includes(selection.cli)) {
+                throw new Error(
+                    `${selection.cli} is not currently available in this local environment.`,
                 );
             }
+
+            await setDesktopLocalChatSelection(projectId, selection, {
+                conversationId,
+            });
+
+            const shouldResume = !resetSession
+                && !!pickerState.session.sessionId
+                && pickerState.session.providerName === selection.cli
+                && pickerState.session.model === selection.model
+                && pickerState.session.status !== 'error'
+                && pickerState.session.status !== 'interrupted';
+            const nextStartedAt = activeTurnStartedAtRef.current ?? new Date();
+
+            await persistSessionState({
+                status: 'submitted',
+                providerName: selection.cli,
+                model: selection.model,
+                sessionId: shouldResume ? pickerState.session.sessionId : null,
+                activeTurnId: activeTurnIdRef.current,
+                startedAt: nextStartedAt,
+                completedAt: null,
+                lastError: null,
+                updatedAt: nextStartedAt,
+            });
 
             const prompt = buildDesktopLocalPrompt({
                 content,
@@ -522,16 +686,12 @@ export function useDesktopLocalChat({
             });
             const promptArg = shellQuote(prompt);
             const modelArg = shellQuote(selection.model);
-            const resumeSessionId = shouldResume ? conversation?.cliSessionId : null;
+            const resumeSessionId = shouldResume ? pickerState.session.sessionId : null;
             const commandText = selection.cli === 'claude'
                 ? `claude -p --model ${modelArg}${resumeSessionId ? ` --resume ${shellQuote(resumeSessionId)}` : ''} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions ${promptArg}`
                 : resumeSessionId
                     ? `codex exec resume --json -m ${modelArg} --dangerously-bypass-approvals-and-sandbox ${shellQuote(resumeSessionId)} ${promptArg}`
                     : `codex exec --json -m ${modelArg} --dangerously-bypass-approvals-and-sandbox ${promptArg}`;
-            const provider = editorEngine.activeSandbox.session.provider;
-            if (!provider) {
-                throw new Error('Desktop local sandbox provider is not ready');
-            }
 
             activeCliRef.current = selection.cli;
             activeModelRef.current = selection.model;
@@ -553,6 +713,7 @@ export function useDesktopLocalChat({
         },
         [
             conversationId,
+            persistSessionState,
             processOutputChunk,
             projectId,
             editorEngine.activeSandbox.session.provider,
@@ -567,6 +728,10 @@ export function useDesktopLocalChat({
             options?: { resetSession?: boolean },
         ) => {
             setError(undefined);
+            const turnId = uuidv4();
+            const turnStartedAt = new Date();
+            activeTurnIdRef.current = turnId;
+            activeTurnStartedAtRef.current = turnStartedAt;
             const messageContext =
                 context ?? (await editorEngine.chat.context.getContextByChatType(type));
             const newMessage = getUserChatMessageFromString(content, messageContext, conversationId);
@@ -575,28 +740,54 @@ export function useDesktopLocalChat({
 
             setStatus('submitted');
             setIsStreaming(true);
-            await runCli({
-                content,
-                context: messageContext,
-                type,
-                resetSession: options?.resetSession,
-            });
+            try {
+                await runCli({
+                    content,
+                    context: messageContext,
+                    type,
+                    resetSession: options?.resetSession,
+                });
+            } catch (runError) {
+                const nextError = runError instanceof Error
+                    ? runError
+                    : new Error('Desktop local chat failed to start');
+                void persistSessionState({
+                    status: 'error',
+                    providerName: activeCliRef.current,
+                    model: activeModelRef.current,
+                    activeTurnId: activeTurnIdRef.current,
+                    completedAt: new Date(),
+                    lastError: nextError.message,
+                    updatedAt: new Date(),
+                });
+                setError(nextError);
+                setIsStreaming(false);
+                setStatus('ready');
+                clearActiveCommand();
+                activeTurnIdRef.current = null;
+                activeTurnStartedAtRef.current = null;
+                throw nextError;
+            }
             void editorEngine.chat.conversation.generateTitle(content);
             return newMessage;
         },
         [
             applyMessages,
+            clearActiveCommand,
             conversationId,
             editorEngine.chat.context,
             editorEngine.chat.conversation,
             persistMessages,
+            persistSessionState,
             runCli,
         ],
     );
 
     const sendMessage: SendMessage = useCallback(
         async (content: string, type: ChatType) => {
-            const selection = await getDesktopLocalChatSelection(projectId);
+            const selection = await getDesktopLocalChatSelection(projectId, {
+                conversationId,
+            });
             posthog.capture('user_send_message', {
                 type,
                 provider: selection?.cli ?? 'desktop-local-cli',
@@ -667,7 +858,9 @@ export function useDesktopLocalChat({
 
     const editMessage: EditMessage = useCallback(
         async (messageId: string, newContent: string, chatType: ChatType) => {
-            const selection = await getDesktopLocalChatSelection(projectId);
+            const selection = await getDesktopLocalChatSelection(projectId, {
+                conversationId,
+            });
             posthog.capture('user_edit_message', {
                 type: chatType,
                 provider: selection?.cli ?? 'desktop-local-cli',
@@ -705,22 +898,48 @@ export function useDesktopLocalChat({
             messagesRef.current = nextMessages;
             await persistMessages(nextMessages);
 
+            activeTurnIdRef.current = uuidv4();
+            activeTurnStartedAtRef.current = new Date();
             setStatus('submitted');
             setIsStreaming(true);
-            await runCli({
-                content: newContent,
-                context: updatedContext,
-                type: chatType,
-                resetSession: true,
-            });
+            try {
+                await runCli({
+                    content: newContent,
+                    context: updatedContext,
+                    type: chatType,
+                    resetSession: true,
+                });
+            } catch (runError) {
+                const nextError = runError instanceof Error
+                    ? runError
+                    : new Error('Desktop local chat failed to restart');
+                void persistSessionState({
+                    status: 'error',
+                    providerName: activeCliRef.current,
+                    model: activeModelRef.current,
+                    activeTurnId: activeTurnIdRef.current,
+                    completedAt: new Date(),
+                    lastError: nextError.message,
+                    updatedAt: new Date(),
+                });
+                setError(nextError);
+                setIsStreaming(false);
+                setStatus('ready');
+                clearActiveCommand();
+                activeTurnIdRef.current = null;
+                activeTurnStartedAtRef.current = null;
+                throw nextError;
+            }
 
             return updatedMessage;
         },
         [
+            clearActiveCommand,
             conversationId,
             editorEngine.chat.context,
             isStreaming,
             persistMessages,
+            persistSessionState,
             posthog,
             projectId,
             runCli,
@@ -733,12 +952,28 @@ export function useDesktopLocalChat({
 
     const stop = useCallback(async () => {
         await activeCommandRef.current?.kill();
+        const completedAt = new Date();
+        finalizeAssistantMessage('stop');
+        void persistSessionState({
+            status: 'interrupted',
+            providerName: activeCliRef.current,
+            model: activeModelRef.current,
+            activeTurnId: activeTurnIdRef.current,
+            completedAt,
+            lastError: null,
+            updatedAt: completedAt,
+        });
         clearActiveCommand();
         setIsStreaming(false);
         setStatus('ready');
         setFinishReason('stop');
         await persistMessages(messagesRef.current);
-    }, [clearActiveCommand, persistMessages]);
+    }, [
+        clearActiveCommand,
+        finalizeAssistantMessage,
+        persistMessages,
+        persistSessionState,
+    ]);
 
     useEffect(() => {
         if (!finishReason) {
@@ -754,39 +989,56 @@ export function useDesktopLocalChat({
             if (finishReason !== 'error') {
                 const content = getMessageText(lastUserMessage.parts);
                 if (content) {
-                    const checkpoints = await createCheckpointsForAllBranches(editorEngine, content);
-                    if (checkpoints.length > 0) {
-                        const oldCheckpoints =
-                            lastUserMessage.metadata?.checkpoints.map((checkpoint) => ({
-                                ...checkpoint,
-                                createdAt: new Date(checkpoint.createdAt),
-                            })) ?? [];
+                    try {
+                        const checkpoints = await createCheckpointsForAllBranches(
+                            editorEngine,
+                            content,
+                        );
+                        if (checkpoints.length > 0) {
+                            const oldCheckpoints =
+                                lastUserMessage.metadata?.checkpoints.map((checkpoint) => ({
+                                    ...checkpoint,
+                                    createdAt: new Date(checkpoint.createdAt),
+                                })) ?? [];
 
-                        const nextMessages = messagesRef.current.map((message) => {
-                            if (message.id !== lastUserMessage.id) {
-                                return message;
-                            }
+                            const nextMessages = messagesRef.current.map((message) => {
+                                if (message.id !== lastUserMessage.id) {
+                                    return message;
+                                }
 
-                            return {
-                                ...message,
-                                metadata: {
-                                    ...message.metadata,
-                                    createdAt: message.metadata?.createdAt ?? new Date(),
-                                    conversationId,
-                                    checkpoints: [...oldCheckpoints, ...checkpoints],
-                                    context: message.metadata?.context ?? [],
-                                },
-                            };
-                        });
+                                return {
+                                    ...message,
+                                    metadata: {
+                                        ...message.metadata,
+                                        createdAt: message.metadata?.createdAt ?? new Date(),
+                                        conversationId,
+                                        checkpoints: [...oldCheckpoints, ...checkpoints],
+                                        context: message.metadata?.context ?? [],
+                                    },
+                                };
+                            });
 
-                        const clonedMessages = jsonClone(nextMessages);
-                        setMessages(clonedMessages);
-                        messagesRef.current = clonedMessages;
+                            const clonedMessages = jsonClone(nextMessages);
+                            setMessages(clonedMessages);
+                            messagesRef.current = clonedMessages;
+                        }
+                    } catch (checkpointError) {
+                        console.error(
+                            'Failed to create desktop-local chat checkpoints:',
+                            checkpointError,
+                        );
                     }
                 }
             }
 
-            await editorEngine.chat.context.clearImagesFromContext();
+            try {
+                await editorEngine.chat.context.clearImagesFromContext();
+            } catch (contextError) {
+                console.error(
+                    'Failed to clear desktop-local chat image context:',
+                    contextError,
+                );
+            }
             await persistMessages(messagesRef.current);
 
             if (finishReason === 'stop' && queuedMessages.length > 0) {
@@ -797,6 +1049,8 @@ export function useDesktopLocalChat({
         };
 
         void finalizeTurn().finally(() => {
+            activeTurnIdRef.current = null;
+            activeTurnStartedAtRef.current = null;
             setFinishReason(null);
         });
     }, [

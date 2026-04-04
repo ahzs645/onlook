@@ -13,6 +13,15 @@ import { isDesktopLocalProjectId, parseDesktopLocalProjectId } from './desktop-l
 const DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
 
 export type DesktopLocalChatCli = 'claude' | 'codex';
+export type DesktopLocalChatSessionStatus =
+    | 'idle'
+    | 'submitted'
+    | 'running'
+    | 'completed'
+    | 'stopped'
+    | 'error'
+    | 'interrupted';
+export type DesktopLocalChatRuntimeMode = 'full-access';
 export type DesktopLocalChatModelSelection = {
     cli: DesktopLocalChatCli;
     model: string;
@@ -28,10 +37,29 @@ interface DesktopLocalChatPreferences {
     selectedModels: Partial<Record<DesktopLocalChatCli, string>>;
 }
 
+export interface DesktopLocalConversationSessionState {
+    status: DesktopLocalChatSessionStatus;
+    runtimeMode: DesktopLocalChatRuntimeMode;
+    providerName: DesktopLocalChatCli | null;
+    model: string | null;
+    sessionId: string | null;
+    activeTurnId: string | null;
+    lastError: string | null;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    updatedAt: Date;
+}
+
 export interface DesktopLocalStoredConversation extends ChatConversation {
-    cliSessionId: string | null;
-    cliType: DesktopLocalChatCli | null;
-    cliModel: string | null;
+    draftSelection: DesktopLocalChatModelSelection | null;
+    session: DesktopLocalConversationSessionState;
+}
+
+export interface DesktopLocalChatPickerState {
+    availableClis: DesktopLocalChatCli[];
+    selection: DesktopLocalChatModelSelection | null;
+    lockedProvider: DesktopLocalChatCli | null;
+    session: DesktopLocalConversationSessionState;
 }
 
 interface DesktopLocalChatStore {
@@ -73,6 +101,23 @@ function createDefaultPreferences(): DesktopLocalChatPreferences {
     return {
         selectedCli: null,
         selectedModels: {},
+    };
+}
+
+function createEmptyConversationSession(
+    updatedAt = new Date(),
+): DesktopLocalConversationSessionState {
+    return {
+        status: 'idle',
+        runtimeMode: 'full-access',
+        providerName: null,
+        model: null,
+        sessionId: null,
+        activeTurnId: null,
+        lastError: null,
+        startedAt: null,
+        completedAt: null,
+        updatedAt,
     };
 }
 
@@ -171,14 +216,127 @@ function hydrateMessage(message: unknown): ChatMessage {
                 context: Array.isArray(metadata.context)
                     ? (metadata.context as ChatMessageMetadata['context'])
                     : [],
+                turnId: typeof metadata.turnId === 'string' ? metadata.turnId : undefined,
+                streaming: typeof metadata.streaming === 'boolean' ? metadata.streaming : undefined,
+                completedAt:
+                    metadata.completedAt !== undefined && metadata.completedAt !== null
+                        ? toDate(metadata.completedAt)
+                        : undefined,
                 error: typeof metadata.error === 'string' ? metadata.error : undefined,
             }
             : undefined,
     };
 }
 
+function isDesktopLocalChatCli(value: unknown): value is DesktopLocalChatCli {
+    return value === 'claude' || value === 'codex';
+}
+
+function isDesktopLocalChatSessionStatus(value: unknown): value is DesktopLocalChatSessionStatus {
+    return value === 'idle'
+        || value === 'submitted'
+        || value === 'running'
+        || value === 'completed'
+        || value === 'stopped'
+        || value === 'error'
+        || value === 'interrupted';
+}
+
+function isValidDesktopLocalChatModel(cli: DesktopLocalChatCli, model: unknown): model is string {
+    return typeof model === 'string'
+        && DESKTOP_LOCAL_CHAT_MODEL_OPTIONS[cli].some((option) => option.value === model);
+}
+
+function normalizeDesktopLocalChatSelection(
+    cli: DesktopLocalChatCli,
+    model: unknown,
+): DesktopLocalChatModelSelection {
+    return {
+        cli,
+        model: isValidDesktopLocalChatModel(cli, model)
+            ? model
+            : getDefaultDesktopLocalChatModel(cli),
+    };
+}
+
+function maybeCreateDesktopLocalChatSelection(
+    cli: DesktopLocalChatCli | null,
+    model: unknown,
+): DesktopLocalChatModelSelection | null {
+    if (!cli) {
+        return null;
+    }
+
+    return normalizeDesktopLocalChatSelection(cli, model);
+}
+
+function hydrateConversationSession(
+    session: unknown,
+    fallback: {
+        legacyCliType: DesktopLocalChatCli | null;
+        legacyCliModel: string | null;
+        legacyCliSessionId: string | null;
+        fallbackUpdatedAt: Date;
+    },
+): DesktopLocalConversationSessionState {
+    const candidate =
+        session && typeof session === 'object'
+            ? (session as Record<string, unknown>)
+            : {};
+    const providerName = isDesktopLocalChatCli(candidate.providerName)
+        ? candidate.providerName
+        : fallback.legacyCliType;
+    const model =
+        typeof candidate.model === 'string'
+            ? candidate.model
+            : fallback.legacyCliModel;
+    const sessionId =
+        typeof candidate.sessionId === 'string'
+            ? candidate.sessionId
+            : fallback.legacyCliSessionId;
+
+    return {
+        status: isDesktopLocalChatSessionStatus(candidate.status)
+            ? candidate.status
+            : providerName || sessionId
+                ? 'completed'
+                : 'idle',
+        runtimeMode: candidate.runtimeMode === 'full-access' ? 'full-access' : 'full-access',
+        providerName,
+        model: typeof model === 'string' ? model : null,
+        sessionId: typeof sessionId === 'string' ? sessionId : null,
+        activeTurnId: typeof candidate.activeTurnId === 'string' ? candidate.activeTurnId : null,
+        lastError: typeof candidate.lastError === 'string' ? candidate.lastError : null,
+        startedAt:
+            candidate.startedAt !== undefined && candidate.startedAt !== null
+                ? toDate(candidate.startedAt)
+                : null,
+        completedAt:
+            candidate.completedAt !== undefined && candidate.completedAt !== null
+                ? toDate(candidate.completedAt)
+                : null,
+        updatedAt:
+            candidate.updatedAt !== undefined && candidate.updatedAt !== null
+                ? toDate(candidate.updatedAt)
+                : fallback.fallbackUpdatedAt,
+    };
+}
+
 function hydrateConversation(conversation: unknown): DesktopLocalStoredConversation {
     const candidate = (conversation ?? {}) as Record<string, unknown>;
+    const updatedAt = toDate(candidate.updatedAt);
+    const legacyCliType = isDesktopLocalChatCli(candidate.cliType) ? candidate.cliType : null;
+    const legacyCliModel = typeof candidate.cliModel === 'string' ? candidate.cliModel : null;
+    const legacyCliSessionId = typeof candidate.cliSessionId === 'string'
+        ? candidate.cliSessionId
+        : null;
+    const session = hydrateConversationSession(candidate.session, {
+        legacyCliType,
+        legacyCliModel,
+        legacyCliSessionId,
+        fallbackUpdatedAt: updatedAt,
+    });
+
     return {
         id: typeof candidate.id === 'string' ? candidate.id : uuidv4(),
         agentType:
@@ -188,23 +346,27 @@ function hydrateConversation(conversation: unknown): DesktopLocalStoredConversat
         title: typeof candidate.title === 'string' ? candidate.title : null,
         projectId: typeof candidate.projectId === 'string' ? candidate.projectId : '',
         createdAt: toDate(candidate.createdAt),
-        updatedAt: toDate(candidate.updatedAt),
+        updatedAt,
         suggestions: Array.isArray(candidate.suggestions)
             ? (candidate.suggestions as ChatConversation['suggestions'])
             : [],
-        cliSessionId: typeof candidate.cliSessionId === 'string' ? candidate.cliSessionId : null,
-        cliType: isDesktopLocalChatCli(candidate.cliType) ? candidate.cliType : null,
-        cliModel: typeof candidate.cliModel === 'string' ? candidate.cliModel : null,
+        draftSelection:
+            maybeCreateDesktopLocalChatSelection(
+                candidate.draftSelection && typeof candidate.draftSelection === 'object'
+                    ? isDesktopLocalChatCli(
+                        (candidate.draftSelection as Record<string, unknown>).cli,
+                    )
+                        ? (candidate.draftSelection as Record<string, unknown>).cli as DesktopLocalChatCli
+                        : null
+                    : null,
+                candidate.draftSelection && typeof candidate.draftSelection === 'object'
+                    ? (candidate.draftSelection as Record<string, unknown>).model
+                    : null,
+            )
+            ?? maybeCreateDesktopLocalChatSelection(session.providerName, session.model)
+            ?? maybeCreateDesktopLocalChatSelection(legacyCliType, legacyCliModel),
+        session,
     };
-}
-
-function isDesktopLocalChatCli(value: unknown): value is DesktopLocalChatCli {
-    return value === 'claude' || value === 'codex';
-}
-
-function isValidDesktopLocalChatModel(cli: DesktopLocalChatCli, model: unknown): model is string {
-    return typeof model === 'string'
-        && DESKTOP_LOCAL_CHAT_MODEL_OPTIONS[cli].some((option) => option.value === model);
 }
 
 function hydratePreferences(preferences: unknown): DesktopLocalChatPreferences {
@@ -347,9 +509,8 @@ export function createDesktopLocalConversation(
         createdAt: now,
         updatedAt: now,
         suggestions: [],
-        cliSessionId: null,
-        cliType: null,
-        cliModel: null,
+        draftSelection: null,
+        session: createEmptyConversationSession(now),
     };
 }
 
@@ -497,6 +658,43 @@ export async function replaceDesktopLocalConversationMessages(
     await writeDesktopLocalChatStore(projectId, store);
 }
 
+export async function getDesktopLocalConversationSession(
+    projectId: string,
+    conversationId: string,
+): Promise<DesktopLocalConversationSessionState> {
+    const conversation = await getDesktopLocalConversation(projectId, conversationId);
+    return conversation?.session ?? createEmptyConversationSession();
+}
+
+export async function updateDesktopLocalConversationSession(
+    projectId: string,
+    conversationId: string,
+    updates: Partial<DesktopLocalConversationSessionState>,
+): Promise<DesktopLocalStoredConversation | null> {
+    const currentConversation = await getDesktopLocalConversation(projectId, conversationId);
+    const baseConversation = currentConversation ?? createDesktopLocalConversation(projectId);
+    const nextUpdatedAt = updates.updatedAt ?? new Date();
+    const nextSession = hydrateConversationSession(
+        {
+            ...baseConversation.session,
+            ...updates,
+            updatedAt: nextUpdatedAt,
+        },
+        {
+            legacyCliType: baseConversation.session.providerName,
+            legacyCliModel: baseConversation.session.model,
+            legacyCliSessionId: baseConversation.session.sessionId,
+            fallbackUpdatedAt: nextUpdatedAt,
+        },
+    );
+
+    return updateDesktopLocalConversation(projectId, conversationId, {
+        ...(!currentConversation ? { id: conversationId } : {}),
+        session: nextSession,
+        updatedAt: nextUpdatedAt,
+    });
+}
+
 export async function setDesktopLocalConversationCliSession(
     projectId: string,
     conversationId: string,
@@ -504,10 +702,11 @@ export async function setDesktopLocalConversationCliSession(
     cliSessionId: string | null,
     cliModel: string | null,
 ) {
-    await updateDesktopLocalConversation(projectId, conversationId, {
-        cliType,
-        cliSessionId,
-        cliModel,
+    await updateDesktopLocalConversationSession(projectId, conversationId, {
+        status: cliType ? 'running' : 'idle',
+        providerName: cliType,
+        model: cliModel,
+        sessionId: cliSessionId,
         updatedAt: new Date(),
     });
 }
@@ -548,7 +747,18 @@ export async function listAvailableDesktopLocalChatClis(
 
 export async function getDesktopLocalChatSelection(
     projectId: string,
+    options?: {
+        conversationId?: string;
+    },
 ): Promise<DesktopLocalChatModelSelection | null> {
+    const pickerState = options?.conversationId
+        ? await getDesktopLocalChatPickerState(projectId, options.conversationId)
+        : null;
+
+    if (pickerState) {
+        return pickerState.selection;
+    }
+
     const [store, availableClis] = await Promise.all([
         readDesktopLocalChatStore(projectId),
         listAvailableDesktopLocalChatClis(projectId),
@@ -581,12 +791,19 @@ export async function getDesktopLocalChatSelection(
 export async function setDesktopLocalChatSelection(
     projectId: string,
     selection: DesktopLocalChatModelSelection,
+    options?: {
+        conversationId?: string;
+    },
 ): Promise<DesktopLocalChatModelSelection> {
     const store = await readDesktopLocalChatStore(projectId);
     const nextCli = selection.cli;
     const nextModel = isValidDesktopLocalChatModel(nextCli, selection.model)
         ? selection.model
         : getDefaultDesktopLocalChatModel(nextCli);
+    let resolvedSelection: DesktopLocalChatModelSelection = {
+        cli: nextCli,
+        model: nextModel,
+    };
 
     store.preferences = {
         selectedCli: nextCli,
@@ -596,10 +813,105 @@ export async function setDesktopLocalChatSelection(
         },
     };
 
+    if (options?.conversationId) {
+        const existingConversation = store.conversations.find(
+            (conversation) => conversation.id === options.conversationId,
+        );
+        const lockedProvider = existingConversation?.session.providerName ?? null;
+        const effectiveCli = lockedProvider ?? nextCli;
+        const effectiveSelection = normalizeDesktopLocalChatSelection(
+            effectiveCli,
+            lockedProvider === nextCli
+                ? nextModel
+                : existingConversation?.draftSelection?.cli === effectiveCli
+                    ? existingConversation.draftSelection.model
+                    : existingConversation?.session.model,
+        );
+        resolvedSelection = effectiveSelection;
+        const nextConversation = hydrateConversation({
+            ...(existingConversation ?? createDesktopLocalConversation(projectId)),
+            id: options.conversationId,
+            projectId,
+            draftSelection: effectiveSelection,
+            updatedAt: new Date(),
+        });
+        const existingIndex = store.conversations.findIndex(
+            (conversation) => conversation.id === options.conversationId,
+        );
+        if (existingIndex === -1) {
+            store.conversations.push(nextConversation);
+        } else {
+            store.conversations[existingIndex] = nextConversation;
+        }
+        store.conversations = sortConversations(store.conversations);
+    }
+
     await writeDesktopLocalChatStore(projectId, store);
 
+    return resolvedSelection;
+}
+
+function resolveDesktopLocalChatSelectionFromConversation(
+    store: DesktopLocalChatStore,
+    conversation: DesktopLocalStoredConversation | null,
+    availableClis: DesktopLocalChatCli[],
+): DesktopLocalChatModelSelection | null {
+    if (conversation?.session.providerName) {
+        const preferredModel =
+            conversation.draftSelection?.cli === conversation.session.providerName
+                ? conversation.draftSelection.model
+                : conversation.session.model;
+        return normalizeDesktopLocalChatSelection(
+            conversation.session.providerName,
+            preferredModel
+                ?? store.preferences.selectedModels[conversation.session.providerName]
+                ?? conversation.session.model,
+        );
+    }
+
+    if (
+        conversation?.draftSelection
+        && availableClis.includes(conversation.draftSelection.cli)
+    ) {
+        return normalizeDesktopLocalChatSelection(
+            conversation.draftSelection.cli,
+            conversation.draftSelection.model,
+        );
+    }
+
+    const fallbackCli = availableClis[0];
+    if (!fallbackCli) {
+        return null;
+    }
+
+    const preferredCli = store.preferences.selectedCli;
+    const cli = preferredCli && availableClis.includes(preferredCli)
+        ? preferredCli
+        : fallbackCli;
+    return normalizeDesktopLocalChatSelection(cli, store.preferences.selectedModels[cli]);
+}
+
+export async function getDesktopLocalChatPickerState(
+    projectId: string,
+    conversationId: string,
+): Promise<DesktopLocalChatPickerState> {
+    const [store, availableClis] = await Promise.all([
+        readDesktopLocalChatStore(projectId),
+        listAvailableDesktopLocalChatClis(projectId),
+    ]);
+    const conversation = store.conversations.find(
+        (entry) => entry.id === conversationId,
+    ) ?? null;
+    const session = conversation?.session ?? createEmptyConversationSession();
+
     return {
-        cli: nextCli,
-        model: nextModel,
+        availableClis,
+        selection: resolveDesktopLocalChatSelectionFromConversation(
+            store,
+            conversation,
+            availableClis,
+        ),
+        lockedProvider: session.providerName,
+        session,
     };
 }

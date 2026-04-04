@@ -3,13 +3,11 @@
 import { useEditorEngine } from '@/components/store/editor';
 import {
     DESKTOP_LOCAL_CHAT_PROVIDER_LABELS,
+    getDesktopLocalChatPickerState,
     getDesktopLocalChatModelLabel,
     getDesktopLocalChatModelOptions,
-    getDesktopLocalChatSelection,
-    listAvailableDesktopLocalChatClis,
     setDesktopLocalChatSelection,
     type DesktopLocalChatCli,
-    type DesktopLocalChatModelSelection,
 } from '@/utils/desktop-local-chat';
 import { Button } from '@onlook/ui/button';
 import {
@@ -31,6 +29,7 @@ import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 
 interface ModelSelectorProps {
+    conversationId: string;
     disabled?: boolean;
 }
 
@@ -43,12 +42,17 @@ const MODEL_I18N_KEYS = {
 } as const;
 
 export function DesktopLocalChatModelSelector({
+    conversationId,
     disabled = false,
 }: ModelSelectorProps) {
     const editorEngine = useEditorEngine();
     const t = useTranslations();
     const [availableClis, setAvailableClis] = useState<DesktopLocalChatCli[]>([]);
-    const [selection, setSelection] = useState<DesktopLocalChatModelSelection | null>(null);
+    const [selection, setSelection] = useState<{
+        cli: DesktopLocalChatCli;
+        model: string;
+    } | null>(null);
+    const [lockedProvider, setLockedProvider] = useState<DesktopLocalChatCli | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
 
@@ -58,17 +62,18 @@ export function DesktopLocalChatModelSelector({
         const load = async () => {
             try {
                 setIsLoading(true);
-                const [nextClis, nextSelection] = await Promise.all([
-                    listAvailableDesktopLocalChatClis(editorEngine.projectId),
-                    getDesktopLocalChatSelection(editorEngine.projectId),
-                ]);
+                const nextState = await getDesktopLocalChatPickerState(
+                    editorEngine.projectId,
+                    conversationId,
+                );
 
                 if (cancelled) {
                     return;
                 }
 
-                setAvailableClis(nextClis);
-                setSelection(nextSelection);
+                setAvailableClis(nextState.availableClis);
+                setSelection(nextState.selection);
+                setLockedProvider(nextState.lockedProvider);
             } catch (error) {
                 if (!cancelled) {
                     console.error('Failed to load desktop-local chat model selection', error);
@@ -86,15 +91,27 @@ export function DesktopLocalChatModelSelector({
         return () => {
             cancelled = true;
         };
-    }, [editorEngine.projectId, t]);
+    }, [conversationId, disabled, editorEngine.projectId, t]);
 
     const handleSelect = async (cli: DesktopLocalChatCli, model: string) => {
         try {
-            const nextSelection = await setDesktopLocalChatSelection(editorEngine.projectId, {
-                cli,
-                model,
-            });
-            setSelection(nextSelection);
+            await setDesktopLocalChatSelection(
+                editorEngine.projectId,
+                {
+                    cli,
+                    model,
+                },
+                {
+                    conversationId,
+                },
+            );
+            const nextState = await getDesktopLocalChatPickerState(
+                editorEngine.projectId,
+                conversationId,
+            );
+            setAvailableClis(nextState.availableClis);
+            setSelection(nextState.selection);
+            setLockedProvider(nextState.lockedProvider);
             setIsOpen(false);
         } catch (error) {
             console.error('Failed to update desktop-local chat model selection', error);
@@ -111,7 +128,11 @@ export function DesktopLocalChatModelSelector({
             ? t(MODEL_I18N_KEYS.loading as never)
             : t(MODEL_I18N_KEYS.unavailable as never);
 
-    const isDisabled = disabled || isLoading || availableClis.length === 0;
+    const isDisabled = disabled || isLoading || (availableClis.length === 0 && !selection);
+    const providerOrder = Object.keys(
+        DESKTOP_LOCAL_CHAT_PROVIDER_LABELS,
+    ) as DesktopLocalChatCli[];
+    const TriggerIcon = lockedProvider ? Icons.LockClosed : Icons.Sparkles;
 
     return (
         <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
@@ -125,7 +146,7 @@ export function DesktopLocalChatModelSelector({
                         isDisabled && 'opacity-50 cursor-not-allowed',
                     )}
                 >
-                    <Icons.Sparkles className="w-4 h-4 text-foreground-secondary" />
+                    <TriggerIcon className="w-4 h-4 text-foreground-secondary" />
                     <span className="text-xs font-medium truncate">{triggerLabel}</span>
                     <Icons.ChevronDown className="w-3 h-3 text-foreground-tertiary" />
                 </Button>
@@ -134,33 +155,60 @@ export function DesktopLocalChatModelSelector({
                 <DropdownMenuLabel>
                     {t(MODEL_I18N_KEYS.label as never)}
                 </DropdownMenuLabel>
-                {availableClis.map((cli) => (
-                    <DropdownMenuSub key={cli}>
-                        <DropdownMenuSubTrigger>
-                            <Icons.Sparkles className="w-4 h-4" />
-                            <span>{DESKTOP_LOCAL_CHAT_PROVIDER_LABELS[cli]}</span>
-                            {selection?.cli === cli && (
-                                <DropdownMenuShortcut>
-                                    {getDesktopLocalChatModelLabel(cli, selection.model)}
-                                </DropdownMenuShortcut>
-                            )}
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent>
-                            <DropdownMenuRadioGroup
-                                value={selection?.cli === cli ? selection.model : undefined}
-                                onValueChange={(value) => {
-                                    void handleSelect(cli, value);
-                                }}
+                {lockedProvider ? (
+                    <DropdownMenuRadioGroup
+                        value={selection?.cli === lockedProvider ? selection.model : undefined}
+                        onValueChange={(value) => {
+                            void handleSelect(lockedProvider, value);
+                        }}
+                    >
+                        {getDesktopLocalChatModelOptions(lockedProvider).map((option) => (
+                            <DropdownMenuRadioItem
+                                key={option.value}
+                                value={option.value}
+                                disabled={!availableClis.includes(lockedProvider)}
                             >
-                                {getDesktopLocalChatModelOptions(cli).map((option) => (
-                                    <DropdownMenuRadioItem key={option.value} value={option.value}>
-                                        {option.label}
-                                    </DropdownMenuRadioItem>
-                                ))}
-                            </DropdownMenuRadioGroup>
-                        </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                ))}
+                                {option.label}
+                            </DropdownMenuRadioItem>
+                        ))}
+                    </DropdownMenuRadioGroup>
+                ) : (
+                    providerOrder.map((cli) => {
+                        const isAvailable = availableClis.includes(cli);
+                        return (
+                            <DropdownMenuSub key={cli}>
+                                <DropdownMenuSubTrigger disabled={!isAvailable}>
+                                    <Icons.Sparkles className="w-4 h-4" />
+                                    <span>{DESKTOP_LOCAL_CHAT_PROVIDER_LABELS[cli]}</span>
+                                    {selection?.cli === cli && (
+                                        <DropdownMenuShortcut>
+                                            {getDesktopLocalChatModelLabel(cli, selection.model)}
+                                        </DropdownMenuShortcut>
+                                    )}
+                                </DropdownMenuSubTrigger>
+                                {isAvailable && (
+                                    <DropdownMenuSubContent>
+                                        <DropdownMenuRadioGroup
+                                            value={selection?.cli === cli ? selection.model : undefined}
+                                            onValueChange={(value) => {
+                                                void handleSelect(cli, value);
+                                            }}
+                                        >
+                                            {getDesktopLocalChatModelOptions(cli).map((option) => (
+                                                <DropdownMenuRadioItem
+                                                    key={option.value}
+                                                    value={option.value}
+                                                >
+                                                    {option.label}
+                                                </DropdownMenuRadioItem>
+                                            ))}
+                                        </DropdownMenuRadioGroup>
+                                    </DropdownMenuSubContent>
+                                )}
+                            </DropdownMenuSub>
+                        );
+                    })
+                )}
             </DropdownMenuContent>
         </DropdownMenu>
     );
