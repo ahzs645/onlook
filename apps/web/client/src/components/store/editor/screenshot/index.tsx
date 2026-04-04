@@ -1,8 +1,12 @@
+import { parseDesktopLocalProjectId } from '@/utils/desktop-local';
 import { api } from '@/trpc/client';
 import { isAfter, subMinutes } from 'date-fns';
 import { debounce } from 'lodash';
 import { makeAutoObservable } from 'mobx';
 import type { EditorEngine } from '../engine';
+
+const DESKTOP_PREVIEW_CAPTURE_ATTEMPTS = 5;
+const DESKTOP_PREVIEW_CAPTURE_RETRY_DELAY_MS = 1000;
 
 export class ScreenshotManager {
     _lastScreenshotTime: Date | null = null;
@@ -18,6 +22,19 @@ export class ScreenshotManager {
 
     set lastScreenshotAt(time: Date | null) {
         this._lastScreenshotTime = time;
+    }
+
+    private getFrameScreenshotCandidates() {
+        const selectedFrames = this.editorEngine.frames.selected.filter((frame) => !!frame.view);
+        const fallbackFrames = this.editorEngine.frames
+            .getAll()
+            .filter(
+                (frame) =>
+                    !!frame.view &&
+                    !selectedFrames.some((selected) => selected.frame.id === frame.frame.id),
+            );
+
+        return [...selectedFrames, ...fallbackFrames];
     }
 
     // 10 second debounce
@@ -49,6 +66,60 @@ export class ScreenshotManager {
         } finally {
             this.isCapturing = false;
         }
+    }
+
+    async captureDesktopLocalProjectPreview(options?: {
+        maxAttempts?: number;
+        retryDelayMs?: number;
+    }) {
+        const desktopProjectId = parseDesktopLocalProjectId(this.editorEngine.projectId);
+        const desktopBridge =
+            typeof window === 'undefined' ? null : window.onlookDesktop ?? null;
+
+        if (!desktopProjectId || !desktopBridge) {
+            return false;
+        }
+
+        if (this.isCapturing) {
+            return false;
+        }
+
+        this.isCapturing = true;
+
+        try {
+            const maxAttempts = Math.max(options?.maxAttempts ?? DESKTOP_PREVIEW_CAPTURE_ATTEMPTS, 1);
+            const retryDelayMs =
+                options?.retryDelayMs ?? DESKTOP_PREVIEW_CAPTURE_RETRY_DELAY_MS;
+
+            for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                const frames = this.getFrameScreenshotCandidates();
+
+                for (const frame of frames) {
+                    try {
+                        const result = await frame.view?.captureScreenshot();
+                        if (!result?.data) {
+                            continue;
+                        }
+
+                        await desktopBridge.saveProjectPreview(desktopProjectId, result.data);
+                        this.lastScreenshotAt = new Date();
+                        return true;
+                    } catch {
+                        continue;
+                    }
+                }
+
+                if (attempt < maxAttempts - 1 && retryDelayMs > 0) {
+                    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+                }
+            }
+        } catch (error) {
+            console.error('Error capturing desktop-local preview', error);
+        } finally {
+            this.isCapturing = false;
+        }
+
+        return false;
     }
 
     clear() {

@@ -232,6 +232,20 @@ function DesktopLocalProjectBootstrap({
     }, [isChatReady, isSandboxReady, onReadyChange]);
 
     useEffect(() => {
+        if (!isSandboxReady || !isChatReady) {
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            void editorEngine.screenshot.captureDesktopLocalProjectPreview();
+        }, 1500);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [desktopProjectId, editorEngine, isChatReady, isSandboxReady, session.id]);
+
+    useEffect(() => {
         if (!isSandboxReady) {
             return;
         }

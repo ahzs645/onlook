@@ -8,6 +8,10 @@ const getWatchChannel = (watcherId: string) => {
     return `desktop:provider:watch:${watcherId}:event`;
 };
 
+const getProjectsUpdatedChannel = () => {
+    return 'desktop:projects:updated';
+};
+
 function subscribe<T>(channel: string, callback: (payload: T) => void) {
     const listener = (_event: Electron.IpcRendererEvent, payload: T) => {
         callback(payload);
@@ -28,6 +32,8 @@ contextBridge.exposeInMainWorld('onlookDesktop', {
     saveProject: (folderPath: string) =>
         ipcRenderer.invoke('desktop:save-project', folderPath),
     getProject: (projectId: string) => ipcRenderer.invoke('desktop:get-project', projectId),
+    saveProjectPreview: (projectId: string, previewImageDataUrl: string) =>
+        ipcRenderer.invoke('desktop:save-project-preview', projectId, previewImageDataUrl),
     launchProject: (folderPath: string) =>
         ipcRenderer.invoke('desktop:launch-project', folderPath),
     launchProjectById: (projectId: string) =>
@@ -35,6 +41,8 @@ contextBridge.exposeInMainWorld('onlookDesktop', {
     getProjectSession: (sessionId: string) =>
         ipcRenderer.invoke('desktop:get-project-session', sessionId),
     listProjects: () => ipcRenderer.invoke('desktop:list-projects'),
+    onProjectsUpdated: (callback: (payload: { projectId: string }) => void) =>
+        subscribe(getProjectsUpdatedChannel(), callback),
     removeProject: (projectId: string) =>
         ipcRenderer.invoke('desktop:remove-project', projectId),
     openPath: (targetPath: string) => ipcRenderer.invoke('desktop:open-path', targetPath),

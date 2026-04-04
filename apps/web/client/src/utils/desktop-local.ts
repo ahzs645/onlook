@@ -19,6 +19,7 @@ export interface DesktopProjectSummary {
     sampleFiles: string[];
     port: number;
     previewUrl: string;
+    previewImageDataUrl?: string | null;
     devCommand: string | null;
     buildCommand: string | null;
     installCommand: string | null;
@@ -87,10 +88,15 @@ declare global {
         inspectProject: (folderPath: string) => Promise<DesktopProjectSummary>;
         saveProject: (folderPath: string) => Promise<DesktopRecentProject>;
         getProject: (projectId: string) => Promise<DesktopRecentProject | null>;
+        saveProjectPreview: (
+            projectId: string,
+            previewImageDataUrl: string,
+        ) => Promise<void>;
         launchProject: (folderPath: string) => Promise<DesktopProjectSession>;
         launchProjectById: (projectId: string) => Promise<DesktopProjectSession>;
         getProjectSession: (sessionId: string) => Promise<DesktopProjectSession | null>;
         listProjects: () => Promise<DesktopRecentProject[]>;
+        onProjectsUpdated: (callback: (payload: { projectId: string }) => void) => () => void;
         removeProject: (projectId: string) => Promise<DesktopRecentProject[]>;
         openPath: (targetPath: string) => Promise<void>;
         openExternal: (targetUrl: string) => Promise<void>;

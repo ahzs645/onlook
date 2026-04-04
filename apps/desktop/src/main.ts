@@ -16,6 +16,11 @@ const MAX_SAMPLE_FILES = 12;
 const MAX_RECENT_PROJECTS = 12;
 const PREVIEW_WAIT_TIMEOUT_MS = 120_000;
 const PREVIEW_POLL_INTERVAL_MS = 750;
+const PREVIEW_CAPTURE_WIDTH = 1280;
+const PREVIEW_CAPTURE_HEIGHT = 800;
+const PREVIEW_CAPTURE_SETTLE_MS = 1500;
+const PREVIEW_CAPTURE_TIMEOUT_MS = 15_000;
+const PREVIEW_CAPTURE_PROBE_TIMEOUT_MS = 1500;
 const NODE_FS_SANDBOX_PREFIX = 'nodefs:session:';
 const RECENT_PROJECTS_FILE_NAME = 'desktop-projects.json';
 const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'build', '.git', '.next', '.next-prod']);
@@ -48,6 +53,7 @@ interface DesktopProjectSummary {
     sampleFiles: string[];
     port: number;
     previewUrl: string;
+    previewImageDataUrl?: string | null;
     devCommand: string | null;
     buildCommand: string | null;
     installCommand: string | null;
@@ -92,6 +98,7 @@ function toProjectSummary(summary: DesktopProjectSummary): DesktopProjectSummary
         sampleFiles: summary.sampleFiles,
         port: summary.port,
         previewUrl: summary.previewUrl,
+        previewImageDataUrl: summary.previewImageDataUrl ?? null,
         devCommand: summary.devCommand,
         buildCommand: summary.buildCommand,
         installCommand: summary.installCommand,
@@ -673,6 +680,7 @@ const runtimeIdByFolderPath = new Map<string, string>();
 const terminalsById = new Map<string, DesktopProjectRuntime>();
 const commandsById = new Map<string, DesktopProjectRuntime>();
 const tasksById = new Map<string, DesktopProjectRuntime>();
+const previewCapturesInFlight = new Set<string>();
 
 function getMainWindow() {
     return mainWindow;
@@ -684,6 +692,10 @@ function getStreamChannel(kind: StreamKind, id: string) {
 
 function getWatchChannel(watcherId: string) {
     return `desktop:provider:watch:${watcherId}:event`;
+}
+
+function getProjectsUpdatedChannel() {
+    return 'desktop:projects:updated';
 }
 
 function getWebUrl() {
@@ -779,6 +791,119 @@ async function writeRecentProjects(records: DesktopRecentProjectRecord[]) {
     await fs.writeFile(storagePath, JSON.stringify(records, null, 2), 'utf8');
 }
 
+async function capturePreviewImageDataUrl(previewUrl: string): Promise<string | null> {
+    let captureWindow: BrowserWindow | null = null;
+
+    try {
+        captureWindow = new BrowserWindow({
+            show: false,
+            width: PREVIEW_CAPTURE_WIDTH,
+            height: PREVIEW_CAPTURE_HEIGHT,
+            backgroundColor: '#0b0b0c',
+            paintWhenInitiallyHidden: true,
+            webPreferences: {
+                sandbox: false,
+            },
+        });
+
+        captureWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+        await new Promise<void>((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error(`Timed out loading preview for ${previewUrl}`));
+            }, PREVIEW_CAPTURE_TIMEOUT_MS);
+
+            captureWindow!
+                .loadURL(previewUrl)
+                .then(() => {
+                    clearTimeout(timeoutId);
+                    resolve();
+                })
+                .catch((error) => {
+                    clearTimeout(timeoutId);
+                    reject(error);
+                });
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, PREVIEW_CAPTURE_SETTLE_MS));
+
+        const image = await captureWindow.webContents.capturePage();
+        if (image.isEmpty()) {
+            return null;
+        }
+
+        const resizedImage = image.resize({ width: PREVIEW_CAPTURE_WIDTH });
+        return `data:image/jpeg;base64,${resizedImage.toJPEG(72).toString('base64')}`;
+    } catch (error) {
+        console.warn('[desktop] Failed to capture preview image:', error);
+        return null;
+    } finally {
+        if (captureWindow && !captureWindow.isDestroyed()) {
+            captureWindow.destroy();
+        }
+    }
+}
+
+async function isPreviewReachable(previewUrl: string): Promise<boolean> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PREVIEW_CAPTURE_PROBE_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(previewUrl, {
+            method: 'GET',
+            signal: controller.signal,
+        });
+        return response.ok || response.status >= 300;
+    } catch {
+        return false;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+async function updateRecentProjectPreview(projectId: string, previewImageDataUrl: string) {
+    const records = await readRecentProjects();
+    const nextRecords = records.map((record) =>
+        record.id === projectId
+            ? { ...record, previewImageDataUrl }
+            : record,
+    );
+
+    await writeRecentProjects(nextRecords);
+    getMainWindow()?.webContents.send(getProjectsUpdatedChannel(), { projectId });
+}
+
+async function captureAndPersistRecentProjectPreview(projectId: string, previewUrl: string) {
+    if (previewCapturesInFlight.has(projectId)) {
+        return;
+    }
+
+    previewCapturesInFlight.add(projectId);
+
+    try {
+        const previewImageDataUrl = await capturePreviewImageDataUrl(previewUrl);
+        if (!previewImageDataUrl) {
+            return;
+        }
+
+        await updateRecentProjectPreview(projectId, previewImageDataUrl);
+    } finally {
+        previewCapturesInFlight.delete(projectId);
+    }
+}
+
+async function maybeCaptureRecentProjectPreview(projectId: string, previewUrl: string) {
+    if (previewCapturesInFlight.has(projectId)) {
+        return;
+    }
+
+    if (!(await isPreviewReachable(previewUrl))) {
+        return;
+    }
+
+    await captureAndPersistRecentProjectPreview(projectId, previewUrl);
+}
+
 async function getStoredProjectRecord(projectId: string) {
     const records = await readRecentProjects();
     return records.find((record) => record.id === projectId) ?? null;
@@ -799,6 +924,8 @@ async function upsertRecentProject(
     const nextSummary = toProjectSummary(summary);
     const nextRecord: DesktopRecentProjectRecord = {
         ...nextSummary,
+        previewImageDataUrl:
+            nextSummary.previewImageDataUrl ?? existingRecord?.previewImageDataUrl ?? null,
         id: existingRecord?.id ?? options?.projectId ?? randomUUID(),
         lastOpenedAt:
             options?.markOpened || !existingRecord
@@ -827,10 +954,16 @@ async function upsertRecentProject(
 }
 
 async function saveRecentProject(summary: DesktopProjectSummary, projectId?: string) {
-    return upsertRecentProject(summary, {
+    const record = await upsertRecentProject(summary, {
         projectId,
         markOpened: true,
     });
+
+    if (!record.previewImageDataUrl && summary.previewUrl) {
+        void captureAndPersistRecentProjectPreview(record.id, summary.previewUrl);
+    }
+
+    return record;
 }
 
 async function saveProjectRecord(folderPath: string) {
@@ -855,6 +988,13 @@ async function listRecentProjects(): Promise<DesktopRecentProject[]> {
                 .catch(() => false);
             const runtimeId = runtimeIdByFolderPath.get(record.folderPath) ?? null;
             const runtime = runtimeId ? (runtimesById.get(runtimeId) ?? null) : null;
+
+            if (!record.previewImageDataUrl) {
+                void maybeCaptureRecentProjectPreview(
+                    record.id,
+                    runtime?.previewUrl ?? record.previewUrl,
+                );
+            }
 
             return {
                 ...record,
@@ -1374,6 +1514,29 @@ ipcMain.handle('desktop:get-project', async (_event, projectId: string) => {
     const projects = await listRecentProjects();
     return projects.find((entry) => entry.id === projectId) ?? null;
 });
+
+ipcMain.handle(
+    'desktop:save-project-preview',
+    async (_event, projectId: string, previewImageDataUrl: string) => {
+        if (!projectId) {
+            throw new Error('Project id is required');
+        }
+
+        if (
+            !previewImageDataUrl ||
+            !previewImageDataUrl.startsWith('data:image/')
+        ) {
+            throw new Error('A valid preview image is required');
+        }
+
+        const record = await getStoredProjectRecord(projectId);
+        if (!record) {
+            throw new Error('Desktop project not found');
+        }
+
+        await updateRecentProjectPreview(projectId, previewImageDataUrl);
+    },
+);
 
 ipcMain.handle('desktop:launch-project', async (_event, folderPath: string) => {
     if (!folderPath) {

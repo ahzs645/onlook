@@ -30,6 +30,7 @@ const DesktopLocalTopBar = observer(() => {
     const stateManager = useStateManager();
     const { session } = useDesktopLocalProject();
     const t = useTranslations();
+    const [isReturningToProjects, setIsReturningToProjects] = useState(false);
 
     const undoRedoButtons = [
         {
@@ -52,11 +53,26 @@ const DesktopLocalTopBar = observer(() => {
                 <Button
                     variant="ghost"
                     className="ml-1 gap-2 text-foreground-onlook text-small hover:text-foreground-active hover:!bg-transparent cursor-pointer"
-                    onClick={() => {
-                        router.push(Routes.PROJECTS);
+                    disabled={isReturningToProjects}
+                    onClick={async () => {
+                        setIsReturningToProjects(true);
+
+                        try {
+                            await editorEngine.screenshot.captureDesktopLocalProjectPreview({
+                                maxAttempts: 1,
+                                retryDelayMs: 0,
+                            });
+                        } finally {
+                            router.push(Routes.PROJECTS);
+                            setIsReturningToProjects(false);
+                        }
                     }}
                 >
-                    <Icons.ArrowLeft className="h-4 w-4" />
+                    {isReturningToProjects ? (
+                        <Icons.LoadingSpinner className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <Icons.ArrowLeft className="h-4 w-4" />
+                    )}
                     Projects
                 </Button>
                 <span className="text-foreground-secondary/50 text-small">/</span>

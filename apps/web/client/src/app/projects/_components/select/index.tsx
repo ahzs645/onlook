@@ -41,7 +41,13 @@ function toDesktopPresentationProject(project: DesktopRecentProject): Project {
         metadata: {
             createdAt: updatedAt,
             updatedAt,
-            previewImg: null,
+            previewImg: project.previewImageDataUrl
+                ? {
+                    type: 'url',
+                    url: project.previewImageDataUrl,
+                    updatedAt,
+                }
+                : null,
             description: project.folderPath,
             tags: ['desktop-local'],
         },
@@ -113,6 +119,16 @@ const DesktopSelectProject = ({
         return () => {
             window.removeEventListener(DESKTOP_PROJECTS_REFRESH_EVENT, handleRefresh);
         };
+    }, [desktop]);
+
+    useEffect(() => {
+        if (!desktop) {
+            return;
+        }
+
+        return desktop.onProjectsUpdated((payload) => {
+            void refreshProjects(payload.projectId ?? null);
+        });
     }, [desktop]);
 
     const projects = useMemo(
