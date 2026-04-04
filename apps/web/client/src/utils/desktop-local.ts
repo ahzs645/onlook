@@ -2,6 +2,7 @@ import type { NodeFsDesktopProviderBridge } from '@onlook/code-provider/browser'
 
 export const DESKTOP_LOCAL_PROJECT_PREFIX = 'desktop-local:';
 export const DESKTOP_LOCAL_SESSION_QUERY_KEY = 'session';
+export const DESKTOP_LOCAL_PROJECT_QUERY_KEY = 'project';
 
 export type DesktopProjectSessionStatus = 'starting' | 'running' | 'stopped' | 'error';
 
@@ -35,6 +36,14 @@ export interface DesktopProjectSession extends DesktopProjectSummary {
     lastError?: string;
 }
 
+export interface DesktopRecentProject extends DesktopProjectSummary {
+    id: string;
+    lastOpenedAt: string;
+    exists: boolean;
+    sessionId: string | null;
+    status: DesktopProjectSessionStatus | null;
+}
+
 export function createDesktopLocalProjectId(sessionId: string): string {
     return `${DESKTOP_LOCAL_PROJECT_PREFIX}${sessionId}`;
 }
@@ -57,8 +66,13 @@ declare global {
         electronVersion: string;
         pickDirectory: () => Promise<string | null>;
         inspectProject: (folderPath: string) => Promise<DesktopProjectSummary>;
+        saveProject: (folderPath: string) => Promise<DesktopRecentProject>;
+        getProject: (projectId: string) => Promise<DesktopRecentProject | null>;
         launchProject: (folderPath: string) => Promise<DesktopProjectSession>;
+        launchProjectById: (projectId: string) => Promise<DesktopProjectSession>;
         getProjectSession: (sessionId: string) => Promise<DesktopProjectSession | null>;
+        listProjects: () => Promise<DesktopRecentProject[]>;
+        removeProject: (projectId: string) => Promise<DesktopRecentProject[]>;
         openPath: (targetPath: string) => Promise<void>;
         openExternal: (targetUrl: string) => Promise<void>;
         provider: DesktopProviderBridge;

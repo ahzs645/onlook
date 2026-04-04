@@ -135,20 +135,43 @@ function ensureDesktopLocalProject(projectId: string) {
         throw new Error(`Project is not a desktop-local project: ${projectId}`);
     }
 
-    const sessionId = parseDesktopLocalProjectId(projectId);
-    if (!sessionId) {
+    const desktopProjectId = parseDesktopLocalProjectId(projectId);
+    if (!desktopProjectId) {
         throw new Error(`Desktop-local project id is invalid: ${projectId}`);
     }
 
-    const bridge = window.onlookDesktop?.provider;
-    if (!bridge) {
+    const desktopBridge = window.onlookDesktop;
+    const bridge = desktopBridge?.provider;
+    if (!desktopBridge || !bridge) {
         throw new Error('Desktop provider bridge is not available in this renderer');
     }
 
     return {
-        sessionId,
+        desktopProjectId,
+        desktopBridge,
         bridge,
     };
+}
+
+async function resolveDesktopLocalProjectSession(projectId: string) {
+    const { desktopProjectId, desktopBridge, bridge } = ensureDesktopLocalProject(projectId);
+    const project = await desktopBridge.getProject(desktopProjectId);
+    if (project?.sessionId) {
+        return {
+            bridge,
+            sessionId: project.sessionId,
+        };
+    }
+
+    const legacySession = await desktopBridge.getProjectSession(desktopProjectId);
+    if (legacySession?.id) {
+        return {
+            bridge,
+            sessionId: legacySession.id,
+        };
+    }
+
+    throw new Error(`Desktop project session is not available for ${desktopProjectId}`);
 }
 
 function toDate(value: unknown): Date {
@@ -441,7 +464,7 @@ function isMissingFileError(error: unknown) {
 }
 
 async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLocalChatStore> {
-    const { bridge, sessionId } = ensureDesktopLocalProject(projectId);
+    const { bridge, sessionId } = await resolveDesktopLocalProjectSession(projectId);
 
     try {
         const directoryListing = await bridge.listFiles({
@@ -475,7 +498,7 @@ async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLoca
 }
 
 async function writeDesktopLocalChatStore(projectId: string, store: DesktopLocalChatStore) {
-    const { bridge, sessionId } = ensureDesktopLocalProject(projectId);
+    const { bridge, sessionId } = await resolveDesktopLocalProjectSession(projectId);
 
     await bridge.createDirectory({
         sessionId,
@@ -712,7 +735,7 @@ export async function setDesktopLocalConversationCliSession(
 }
 
 async function detectDesktopLocalChatCli(projectId: string): Promise<DesktopLocalChatCli[]> {
-    const { bridge, sessionId } = ensureDesktopLocalProject(projectId);
+    const { bridge, sessionId } = await resolveDesktopLocalProjectSession(projectId);
     const { output } = await bridge.runCommand({
         sessionId,
         command:

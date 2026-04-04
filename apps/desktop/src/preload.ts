@@ -25,10 +25,18 @@ contextBridge.exposeInMainWorld('onlookDesktop', {
     pickDirectory: () => ipcRenderer.invoke('desktop:pick-directory') as Promise<string | null>,
     inspectProject: (folderPath: string) =>
         ipcRenderer.invoke('desktop:inspect-project', folderPath),
+    saveProject: (folderPath: string) =>
+        ipcRenderer.invoke('desktop:save-project', folderPath),
+    getProject: (projectId: string) => ipcRenderer.invoke('desktop:get-project', projectId),
     launchProject: (folderPath: string) =>
         ipcRenderer.invoke('desktop:launch-project', folderPath),
+    launchProjectById: (projectId: string) =>
+        ipcRenderer.invoke('desktop:launch-project-by-id', projectId),
     getProjectSession: (sessionId: string) =>
         ipcRenderer.invoke('desktop:get-project-session', sessionId),
+    listProjects: () => ipcRenderer.invoke('desktop:list-projects'),
+    removeProject: (projectId: string) =>
+        ipcRenderer.invoke('desktop:remove-project', projectId),
     openPath: (targetPath: string) => ipcRenderer.invoke('desktop:open-path', targetPath),
     openExternal: (targetUrl: string) =>
         ipcRenderer.invoke('desktop:open-external', targetUrl),

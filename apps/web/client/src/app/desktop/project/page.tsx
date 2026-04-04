@@ -25,6 +25,7 @@ import { EditorMode, type Branch, type Canvas as ProjectCanvas, type Frame, type
 import {
     createDesktopLocalProjectId,
     type DesktopProjectSession,
+    DESKTOP_LOCAL_PROJECT_QUERY_KEY,
     DESKTOP_LOCAL_SESSION_QUERY_KEY,
 } from '@/utils/desktop-local';
 import { useDesktopBridge } from '../use-desktop-bridge';
@@ -73,10 +74,10 @@ function DesktopProjectProviders({
     );
 }
 
-function createDesktopProject(session: DesktopProjectSession): Project {
+function createDesktopProject(session: DesktopProjectSession, desktopProjectId: string): Project {
     const now = new Date();
     return {
-        id: createDesktopLocalProjectId(session.id),
+        id: createDesktopLocalProjectId(desktopProjectId),
         name: session.name,
         metadata: {
             createdAt: now,
@@ -198,7 +199,13 @@ function DesktopProjectHeader({ session }: { session: DesktopProjectSession }) {
     );
 }
 
-function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
+function DesktopProjectShell({
+    session,
+    desktopProjectId,
+}: {
+    session: DesktopProjectSession;
+    desktopProjectId: string;
+}) {
     const editorEngine = useEditorEngine();
     const leftPanelRef = useRef<HTMLDivElement | null>(null);
     const rightPanelRef = useRef<HTMLDivElement | null>(null);
@@ -215,7 +222,7 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
             return;
         }
 
-        const project = createDesktopProject(session);
+        const project = createDesktopProject(session, desktopProjectId);
         const branch = createDesktopBranch(project.id, session);
         const canvas = createDesktopCanvas(project.id, session);
         const frame = createDesktopFrame(canvas.id, branch.id, session);
@@ -227,7 +234,7 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
         initializedSessionRef.current = session.id;
         setIsReady(false);
         setIsChatReady(false);
-    }, [editorEngine, session]);
+    }, [desktopProjectId, editorEngine, session]);
 
     useEffect(() => {
         const dispose = reaction(
@@ -253,7 +260,7 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
         const initializeChat = async () => {
             try {
                 const conversations = await editorEngine.chat.conversation.getConversations(
-                    createDesktopLocalProjectId(session.id),
+                    createDesktopLocalProjectId(desktopProjectId),
                 );
                 if (cancelled) {
                     return;
@@ -275,7 +282,7 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
         return () => {
             cancelled = true;
         };
-    }, [editorEngine, isReady, session.id]);
+    }, [desktopProjectId, editorEngine, isReady]);
 
     useEffect(() => {
         if (!isReady) {
@@ -415,7 +422,9 @@ function DesktopProjectShell({ session }: { session: DesktopProjectSession }) {
 }
 
 export default function DesktopProjectPage() {
+    const router = useRouter();
     const searchParams = useSearchParams();
+    const projectId = searchParams.get(DESKTOP_LOCAL_PROJECT_QUERY_KEY);
     const sessionId = searchParams.get(DESKTOP_LOCAL_SESSION_QUERY_KEY);
     const [session, setSession] = useState<DesktopProjectSession | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -433,23 +442,36 @@ export default function DesktopProjectPage() {
             return;
         }
 
-        if (!sessionId) {
-            setError('No desktop project session was provided.');
-            setIsLoading(false);
-            return;
-        }
-
         let cancelled = false;
 
-        void desktop
-            .getProjectSession(sessionId)
-            .then((result: DesktopProjectSession | null) => {
-                if (cancelled) {
-                    return;
+        const loadProject = async () => {
+            if (sessionId) {
+                const existingSession = await desktop.getProjectSession(sessionId);
+                if (existingSession) {
+                    return existingSession;
                 }
+            }
 
-                if (!result) {
-                    setError('This desktop project session is no longer available.');
+            if (!projectId) {
+                throw new Error(
+                    sessionId
+                        ? 'This desktop project session is no longer available.'
+                        : 'No desktop project was provided.',
+                );
+            }
+
+            const restoredSession = await desktop.launchProjectById(projectId);
+            const nextSearch = new URLSearchParams({
+                [DESKTOP_LOCAL_PROJECT_QUERY_KEY]: projectId,
+                [DESKTOP_LOCAL_SESSION_QUERY_KEY]: restoredSession.id,
+            });
+            router.replace(`/desktop/project?${nextSearch.toString()}`);
+            return restoredSession;
+        };
+
+        void loadProject()
+            .then((result) => {
+                if (cancelled) {
                     return;
                 }
 
@@ -471,14 +493,14 @@ export default function DesktopProjectPage() {
         return () => {
             cancelled = true;
         };
-    }, [desktop, isResolving, sessionId]);
+    }, [desktop, isResolving, projectId, router, sessionId]);
 
     const project = useMemo(() => {
-        if (!session) {
+        if (!session || !projectId) {
             return null;
         }
-        return createDesktopProject(session);
-    }, [session]);
+        return createDesktopProject(session, projectId);
+    }, [projectId, session]);
 
     const branches = useMemo(() => {
         if (!project || !session) {
@@ -491,7 +513,7 @@ export default function DesktopProjectPage() {
         return (
             <DesktopLoadingState
                 title="Loading desktop project"
-                body="Restoring the local project session from the Electron shell."
+                body="Restoring the saved desktop project from the Electron shell."
             />
         );
     }
@@ -515,7 +537,7 @@ export default function DesktopProjectPage() {
 
     return (
         <DesktopProjectProviders project={project} branches={branches}>
-            <DesktopProjectShell session={session} />
+            <DesktopProjectShell session={session} desktopProjectId={projectId ?? session.id} />
         </DesktopProjectProviders>
     );
 }

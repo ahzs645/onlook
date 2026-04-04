@@ -11,9 +11,11 @@ const DEFAULT_WEB_URL = 'http://localhost:4100/desktop';
 const DEFAULT_LOOPBACK_HOST = 'localhost';
 const DEFAULT_SHELL = process.env.SHELL ?? '/bin/zsh';
 const MAX_SAMPLE_FILES = 12;
+const MAX_RECENT_PROJECTS = 12;
 const PREVIEW_WAIT_TIMEOUT_MS = 120_000;
 const PREVIEW_POLL_INTERVAL_MS = 750;
 const NODE_FS_SANDBOX_PREFIX = 'nodefs:session:';
+const RECENT_PROJECTS_FILE_NAME = 'desktop-projects.json';
 const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'build', '.git', '.next', '.next-prod']);
 const IGNORED_FILES = new Set([
     '.DS_Store',
@@ -59,6 +61,40 @@ interface DesktopProjectSession extends DesktopProjectSummary {
     sandboxId: string;
     status: SessionStatus;
     lastError?: string;
+}
+
+interface DesktopRecentProjectRecord extends DesktopProjectSummary {
+    id: string;
+    lastOpenedAt: string;
+}
+
+interface DesktopRecentProject extends DesktopProjectSummary {
+    id: string;
+    lastOpenedAt: string;
+    exists: boolean;
+    sessionId: string | null;
+    status: SessionStatus | null;
+}
+
+function toProjectSummary(summary: DesktopProjectSummary): DesktopProjectSummary {
+    return {
+        folderPath: summary.folderPath,
+        name: summary.name,
+        isValid: summary.isValid,
+        error: summary.error,
+        routerType: summary.routerType,
+        packageManager: summary.packageManager,
+        hasGit: summary.hasGit,
+        hasNodeModules: summary.hasNodeModules,
+        fileCount: summary.fileCount,
+        sampleFiles: summary.sampleFiles,
+        port: summary.port,
+        previewUrl: summary.previewUrl,
+        devCommand: summary.devCommand,
+        buildCommand: summary.buildCommand,
+        installCommand: summary.installCommand,
+        scripts: summary.scripts,
+    };
 }
 
 interface WatchRegistration {
@@ -619,11 +655,183 @@ function getWebUrl() {
     return process.env.ONLOOK_DESKTOP_WEB_URL ?? process.env.ONLOOK_WEB_URL ?? DEFAULT_WEB_URL;
 }
 
-function getDesktopProjectUrl(sessionId: string) {
+function getDesktopProjectUrl(sessionId: string, projectId?: string) {
     const url = new URL(getWebUrl());
     url.pathname = '/desktop/project';
-    url.search = `?session=${encodeURIComponent(sessionId)}`;
+    const searchParams = new URLSearchParams({
+        session: sessionId,
+    });
+    if (projectId) {
+        searchParams.set('project', projectId);
+    }
+    url.search = `?${searchParams.toString()}`;
     return url.toString();
+}
+
+function getRecentProjectsStoragePath() {
+    return path.join(app.getPath('userData'), RECENT_PROJECTS_FILE_NAME);
+}
+
+function isDesktopProjectRecord(value: unknown): value is DesktopRecentProjectRecord | Omit<DesktopRecentProjectRecord, 'id'> {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+
+    const candidate = value as Partial<DesktopRecentProjectRecord>;
+    return (
+        typeof candidate.folderPath === 'string' &&
+        typeof candidate.name === 'string' &&
+        typeof candidate.isValid === 'boolean' &&
+        typeof candidate.packageManager === 'string' &&
+        typeof candidate.hasGit === 'boolean' &&
+        typeof candidate.hasNodeModules === 'boolean' &&
+        typeof candidate.fileCount === 'number' &&
+        Array.isArray(candidate.sampleFiles) &&
+        typeof candidate.port === 'number' &&
+        typeof candidate.previewUrl === 'string' &&
+        typeof candidate.lastOpenedAt === 'string'
+    );
+}
+
+async function readRecentProjects(): Promise<DesktopRecentProjectRecord[]> {
+    try {
+        const raw = await fs.readFile(getRecentProjectsStoragePath(), 'utf8');
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        let didMigrate = false;
+        const records = parsed.flatMap((entry) => {
+            if (!isDesktopProjectRecord(entry)) {
+                return [];
+            }
+
+            const candidate = entry as Partial<DesktopRecentProjectRecord>;
+            if (typeof candidate.id !== 'string' || candidate.id.length === 0) {
+                didMigrate = true;
+            }
+
+            return [
+                {
+                    ...candidate,
+                    id: typeof candidate.id === 'string' && candidate.id.length > 0
+                        ? candidate.id
+                        : randomUUID(),
+                } as DesktopRecentProjectRecord,
+            ];
+        });
+
+        if (didMigrate) {
+            await writeRecentProjects(records);
+        }
+
+        return records;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return [];
+        }
+
+        console.warn('[desktop] Failed to read recent projects:', error);
+        return [];
+    }
+}
+
+async function writeRecentProjects(records: DesktopRecentProjectRecord[]) {
+    const storagePath = getRecentProjectsStoragePath();
+    await fs.mkdir(path.dirname(storagePath), { recursive: true });
+    await fs.writeFile(storagePath, JSON.stringify(records, null, 2), 'utf8');
+}
+
+async function getStoredProjectRecord(projectId: string) {
+    const records = await readRecentProjects();
+    return records.find((record) => record.id === projectId) ?? null;
+}
+
+async function upsertRecentProject(
+    summary: DesktopProjectSummary,
+    options?: {
+        projectId?: string;
+        markOpened?: boolean;
+    },
+) {
+    const records = await readRecentProjects();
+    const existingRecord =
+        (options?.projectId
+            ? records.find((record) => record.id === options.projectId)
+            : null) ?? records.find((record) => record.folderPath === summary.folderPath);
+    const nextSummary = toProjectSummary(summary);
+    const nextRecord: DesktopRecentProjectRecord = {
+        ...nextSummary,
+        id: existingRecord?.id ?? options?.projectId ?? randomUUID(),
+        lastOpenedAt:
+            options?.markOpened || !existingRecord
+                ? new Date().toISOString()
+                : existingRecord.lastOpenedAt,
+    };
+    const deduped = records.filter(
+        (record) =>
+            record.id !== nextRecord.id && record.folderPath !== nextRecord.folderPath,
+    );
+
+    const nextRecords =
+        options?.markOpened
+            ? [nextRecord, ...deduped].slice(0, MAX_RECENT_PROJECTS)
+            : [...deduped, nextRecord]
+                  .sort((left, right) => {
+                      return (
+                          new Date(right.lastOpenedAt).getTime() -
+                          new Date(left.lastOpenedAt).getTime()
+                      );
+                  })
+                  .slice(0, MAX_RECENT_PROJECTS);
+
+    await writeRecentProjects(nextRecords);
+    return nextRecord;
+}
+
+async function saveRecentProject(summary: DesktopProjectSummary, projectId?: string) {
+    return upsertRecentProject(summary, {
+        projectId,
+        markOpened: true,
+    });
+}
+
+async function saveProjectRecord(folderPath: string) {
+    const summary = await inspectProject(folderPath);
+    const record = await upsertRecentProject(summary, {
+        markOpened: true,
+    });
+    return {
+        ...summary,
+        id: record.id,
+    };
+}
+
+async function listRecentProjects(): Promise<DesktopRecentProject[]> {
+    const records = await readRecentProjects();
+
+    return Promise.all(
+        records.map(async (record) => {
+            const exists = await fs
+                .access(record.folderPath)
+                .then(() => true)
+                .catch(() => false);
+            const runtimeId = runtimeIdByFolderPath.get(record.folderPath) ?? null;
+            const runtime = runtimeId ? (runtimesById.get(runtimeId) ?? null) : null;
+
+            return {
+                ...record,
+                exists,
+                sessionId: runtime?.id ?? null,
+                status: runtime?.status ?? null,
+            };
+        }),
+    );
+}
+
+async function removeRecentProject(projectId: string) {
+    const records = await readRecentProjects();
+    await writeRecentProjects(records.filter((record) => record.id !== projectId));
 }
 
 function normalizeRelativePath(inputPath: string) {
@@ -1015,12 +1223,47 @@ async function maybeAutoLaunchProject() {
 
         const runtime = getOrCreateRuntime(folderPath, summary);
         await runtime.start();
-        await mainWindow.loadURL(getDesktopProjectUrl(runtime.id));
+        const record = await saveRecentProject(runtime.toSession());
+        await mainWindow.loadURL(getDesktopProjectUrl(runtime.id, record.id));
         return true;
     } catch (error) {
         console.error('[desktop] Failed to auto-launch project:', error);
         return false;
     }
+}
+
+async function maybeResumeRecentProject() {
+    if (!mainWindow) {
+        return false;
+    }
+
+    const records = await readRecentProjects();
+    for (const record of records) {
+        const exists = await fs
+            .access(record.folderPath)
+            .then(() => true)
+            .catch(() => false);
+        if (!exists) {
+            continue;
+        }
+
+        try {
+            const summary = await inspectProject(record.folderPath);
+            if (!summary.isValid) {
+                continue;
+            }
+
+            const runtime = getOrCreateRuntime(record.folderPath, summary);
+            await runtime.start();
+            const savedRecord = await saveRecentProject(runtime.toSession(), record.id);
+            await mainWindow.loadURL(getDesktopProjectUrl(runtime.id, savedRecord.id));
+            return true;
+        } catch (error) {
+            console.error('[desktop] Failed to resume recent project:', error);
+        }
+    }
+
+    return false;
 }
 
 ipcMain.handle('desktop:pick-directory', async () => {
@@ -1043,6 +1286,25 @@ ipcMain.handle('desktop:inspect-project', async (_event, folderPath: string) => 
     return inspectProject(folderPath);
 });
 
+ipcMain.handle('desktop:save-project', async (_event, folderPath: string) => {
+    if (!folderPath) {
+        throw new Error('Folder path is required');
+    }
+
+    const record = await saveProjectRecord(folderPath);
+    const projects = await listRecentProjects();
+    return projects.find((entry) => entry.id === record.id) ?? null;
+});
+
+ipcMain.handle('desktop:get-project', async (_event, projectId: string) => {
+    if (!projectId) {
+        throw new Error('Project id is required');
+    }
+
+    const projects = await listRecentProjects();
+    return projects.find((entry) => entry.id === projectId) ?? null;
+});
+
 ipcMain.handle('desktop:launch-project', async (_event, folderPath: string) => {
     if (!folderPath) {
         throw new Error('Folder path is required');
@@ -1055,11 +1317,46 @@ ipcMain.handle('desktop:launch-project', async (_event, folderPath: string) => {
 
     const runtime = getOrCreateRuntime(folderPath, summary);
     await runtime.start();
+    await saveRecentProject(runtime.toSession());
+    return runtime.toSession();
+});
+
+ipcMain.handle('desktop:launch-project-by-id', async (_event, projectId: string) => {
+    if (!projectId) {
+        throw new Error('Project id is required');
+    }
+
+    const record = await getStoredProjectRecord(projectId);
+    if (!record) {
+        throw new Error('Desktop project not found');
+    }
+
+    const summary = await inspectProject(record.folderPath);
+    if (!summary.isValid) {
+        throw new Error(summary.error ?? 'Project is not valid');
+    }
+
+    const runtime = getOrCreateRuntime(record.folderPath, summary);
+    await runtime.start();
+    await saveRecentProject(runtime.toSession(), record.id);
     return runtime.toSession();
 });
 
 ipcMain.handle('desktop:get-project-session', async (_event, sessionId: string) => {
     return getRuntimeBySessionId(sessionId)?.toSession() ?? null;
+});
+
+ipcMain.handle('desktop:list-projects', async () => {
+    return listRecentProjects();
+});
+
+ipcMain.handle('desktop:remove-project', async (_event, projectId: string) => {
+    if (!projectId) {
+        throw new Error('Project id is required');
+    }
+
+    await removeRecentProject(projectId);
+    return listRecentProjects();
 });
 
 ipcMain.handle('desktop:open-path', async (_event, targetPath: string) => {
@@ -1286,33 +1583,35 @@ ipcMain.handle('desktop:provider:stop-project', async (_event, input) => {
 });
 
 ipcMain.handle('desktop:provider:list-projects', async () => {
-    return {};
+    return {
+        projects: await listRecentProjects(),
+    };
 });
 
 app.whenReady().then(() => {
     const shouldAutoLaunch = Boolean(process.env.ONLOOK_DESKTOP_AUTOLAUNCH_PATH);
-    createWindow(shouldAutoLaunch ? undefined : getWebUrl());
+    createWindow();
 
-    if (shouldAutoLaunch) {
-        void maybeAutoLaunchProject().then((launched) => {
+    void (shouldAutoLaunch ? maybeAutoLaunchProject() : maybeResumeRecentProject()).then(
+        (launched) => {
             if (!launched && mainWindow) {
                 void mainWindow.loadURL(getWebUrl());
             }
-        });
-    }
+        },
+    );
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
             const shouldAutoLaunch = Boolean(process.env.ONLOOK_DESKTOP_AUTOLAUNCH_PATH);
-            createWindow(shouldAutoLaunch ? undefined : getWebUrl());
+            createWindow();
 
-            if (shouldAutoLaunch) {
-                void maybeAutoLaunchProject().then((launched) => {
+            void (shouldAutoLaunch ? maybeAutoLaunchProject() : maybeResumeRecentProject()).then(
+                (launched) => {
                     if (!launched && mainWindow) {
                         void mainWindow.loadURL(getWebUrl());
                     }
-                });
-            }
+                },
+            );
         }
     });
 });
