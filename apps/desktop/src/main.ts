@@ -138,6 +138,7 @@ class ManagedProcess {
     private child: ChildProcessWithoutNullStreams | null = null;
     private expectedStop = false;
     private exitCallbacks = new Set<(code: number | null, signal: NodeJS.Signals | null) => void>();
+    private outputCallbacks = new Set<(data: string) => void>();
 
     constructor(
         id: string,
@@ -165,6 +166,9 @@ class ManagedProcess {
     private emitOutput(data: string) {
         this.buffer.append(data);
         getMainWindow()?.webContents.send(getStreamChannel(this.kind, this.id), data);
+        for (const callback of this.outputCallbacks) {
+            callback(data);
+        }
     }
 
     async start() {
@@ -216,6 +220,13 @@ class ManagedProcess {
         this.exitCallbacks.add(callback);
         return () => {
             this.exitCallbacks.delete(callback);
+        };
+    }
+
+    onOutput(callback: (data: string) => void) {
+        this.outputCallbacks.add(callback);
+        return () => {
+            this.outputCallbacks.delete(callback);
         };
     }
 
@@ -303,6 +314,14 @@ class DesktopProjectRuntime {
                     ? `Dev server stopped with signal ${signal}`
                     : `Dev server exited with code ${code ?? 'unknown'}`;
         });
+        this.task.onOutput((chunk) => {
+            const detectedPort = detectPortFromOutput(chunk) ?? detectPortFromOutput(this.task.buffer.tail());
+            if (!detectedPort || detectedPort === this.summary.port) {
+                return;
+            }
+
+            this.updatePreviewPort(detectedPort);
+        });
     }
 
     private createProcessEnv(): NodeJS.ProcessEnv {
@@ -340,7 +359,9 @@ class DesktopProjectRuntime {
             port,
             previewUrl: `http://${DEFAULT_LOOPBACK_HOST}:${port}`,
         };
-        this.task.setEnv(this.createProcessEnv());
+        if (!this.task.isRunning) {
+            this.task.setEnv(this.createProcessEnv());
+        }
     }
 
     private async ensureLaunchPort() {
@@ -380,7 +401,7 @@ class DesktopProjectRuntime {
         }
 
         try {
-            await waitForPreview(this.previewUrl, async () => !this.task.isRunning, this.task.buffer);
+            await waitForPreview(() => this.previewUrl, async () => !this.task.isRunning, this.task.buffer);
             this.status = 'running';
         } catch (error) {
             this.status = 'error';
@@ -398,7 +419,7 @@ class DesktopProjectRuntime {
         this.lastError = undefined;
         await this.task.restart();
         try {
-            await waitForPreview(this.previewUrl, async () => !this.task.isRunning, this.task.buffer);
+            await waitForPreview(() => this.previewUrl, async () => !this.task.isRunning, this.task.buffer);
             this.status = 'running';
         } catch (error) {
             this.status = 'error';
@@ -1087,11 +1108,54 @@ function scriptSpecifiesPort(script?: string) {
     return /(?:PORT=|--port[=\s]|-p\s*?)(\d+)/.test(script ?? '');
 }
 
-async function isPortAvailable(port: number, host = DEFAULT_LOOPBACK_HOST): Promise<boolean> {
+function parsePort(value: string) {
+    const port = Number.parseInt(value, 10);
+    return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
+}
+
+function detectPortFromOutput(output: string) {
+    const patterns = [
+        /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)/i,
+        /\bLocal:\s*https?:\/\/[^:\s]+:(\d+)/i,
+        /\b(?:starting on|started on)\s+(\d+)\b/i,
+        /\bport\s+\d+\s+is in use,\s+starting on\s+(\d+)\s+instead\b/i,
+        /\bready\b.*?:([0-9]{2,5})\b/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = pattern.exec(output);
+        if (!match?.[1]) {
+            continue;
+        }
+
+        const port = parsePort(match[1]);
+        if (port) {
+            return port;
+        }
+    }
+
+    return null;
+}
+
+async function canBindToPort(port: number, host: string): Promise<boolean> {
     return await new Promise((resolve) => {
         const server = net.createServer();
 
-        server.once('error', () => {
+        server.once('error', (error: NodeJS.ErrnoException) => {
+            if (error.code === 'EADDRINUSE') {
+                resolve(false);
+                return;
+            }
+
+            if (
+                error.code === 'EAFNOSUPPORT' ||
+                error.code === 'EADDRNOTAVAIL' ||
+                error.code === 'EINVAL'
+            ) {
+                resolve(true);
+                return;
+            }
+
             resolve(false);
         });
 
@@ -1103,11 +1167,17 @@ async function isPortAvailable(port: number, host = DEFAULT_LOOPBACK_HOST): Prom
     });
 }
 
-async function findAvailablePort(startPort: number, host = DEFAULT_LOOPBACK_HOST) {
+async function isPortAvailable(port: number): Promise<boolean> {
+    const hosts = ['127.0.0.1', '0.0.0.0', '::1', '::'];
+    const results = await Promise.all(hosts.map((host) => canBindToPort(port, host)));
+    return results.every(Boolean);
+}
+
+async function findAvailablePort(startPort: number) {
     let port = Math.max(startPort, 1);
 
     while (port <= 65535) {
-        if (await isPortAvailable(port, host)) {
+        if (await isPortAvailable(port)) {
             return port;
         }
         port += 1;
@@ -1327,7 +1397,7 @@ async function inspectProject(folderPath: string): Promise<DesktopProjectSummary
 }
 
 async function waitForPreview(
-    previewUrl: string,
+    getPreviewUrl: () => string,
     hasProcessExited: () => Promise<boolean>,
     output: OutputBuffer,
 ) {
@@ -1342,6 +1412,7 @@ async function waitForPreview(
         }
 
         try {
+            const previewUrl = getPreviewUrl();
             const response = await fetch(previewUrl, {
                 method: 'GET',
             });
@@ -1353,6 +1424,7 @@ async function waitForPreview(
         await new Promise((resolve) => setTimeout(resolve, PREVIEW_POLL_INTERVAL_MS));
     }
 
+    const previewUrl = getPreviewUrl();
     throw new Error(
         `Timed out waiting for ${previewUrl}.\n${output.tail() || 'No process output was captured.'}`,
     );
