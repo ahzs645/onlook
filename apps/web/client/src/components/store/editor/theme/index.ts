@@ -315,7 +315,12 @@ export class ThemeManager {
 
     async rename(oldName: string, newName: string) {
         try {
-            await this.updateTailwindColorConfig(oldName, newName, SystemTheme.LIGHT);
+            await this.updateTailwindColorConfig(
+                oldName,
+                '',
+                newName,
+                SystemTheme.LIGHT,
+            );
 
             // Refresh colors after rename
             await this.scanConfig();

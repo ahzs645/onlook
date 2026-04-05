@@ -256,10 +256,18 @@ export class CodeFileSystem extends FileSystem {
 
         const index = getIndexFromCache(this.getCacheKey());
         if (index) {
+            const tempIndexPath = `${this.indexPath}.tmp`;
             try {
-                await super.writeFile(this.indexPath, JSON.stringify(index));
+                await super.writeFile(tempIndexPath, JSON.stringify(index));
+                if (await this.fileExists(this.indexPath)) {
+                    await super.deleteFile(this.indexPath);
+                }
+                await super.moveFile(tempIndexPath, this.indexPath);
             } catch (error) {
                 console.warn(`[CodeEditorApi] Failed to write ${this.indexPath}: ${error}`);
+                if (await this.fileExists(tempIndexPath)) {
+                    await super.deleteFile(tempIndexPath).catch(() => undefined);
+                }
             }
         }
     }

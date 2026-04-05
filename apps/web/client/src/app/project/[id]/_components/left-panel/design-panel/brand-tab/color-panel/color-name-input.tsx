@@ -2,7 +2,7 @@ import { useEditorEngine } from '@/components/store/editor';
 import { Tooltip, TooltipContent, TooltipPortal, TooltipTrigger } from '@onlook/ui/tooltip';
 import { toNormalCase } from '@onlook/utility';
 import { camelCase } from 'lodash';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface ColorNameInputProps {
     initialName: string;
@@ -25,11 +25,13 @@ export const ColorNameInput = ({
 }: ColorNameInputProps) => {
     const [inputValue, setInputValue] = useState(toNormalCase(initialName));
     const [error, setError] = useState<string | null>(null);
+    const shouldIgnoreBlurRef = useRef(false);
     const editorEngine = useEditorEngine();
     const themeManager = editorEngine.theme;
 
     useEffect(() => {
         setInputValue(toNormalCase(initialName));
+        shouldIgnoreBlurRef.current = false;
     }, [initialName]);
 
     const validateName = (value: string): string | null => {
@@ -69,11 +71,13 @@ export const ColorNameInput = ({
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newValue = e.target.value;
+        shouldIgnoreBlurRef.current = false;
         setInputValue(newValue);
         setError(validateName(newValue.trim()));
     };
 
     const handleSubmit = () => {
+        shouldIgnoreBlurRef.current = true;
         if (!error && inputValue.trim() && camelCase(inputValue) !== initialName) {
             onSubmit(camelCase(inputValue));
         } else {
@@ -97,7 +101,13 @@ export const ColorNameInput = ({
                     value={inputValue}
                     onChange={handleChange}
                     onKeyDown={handleKeyDown}
-                    onBlur={() => onBlur?.(inputValue)}
+                    onBlur={() => {
+                        if (shouldIgnoreBlurRef.current) {
+                            shouldIgnoreBlurRef.current = false;
+                            return;
+                        }
+                        onBlur?.(inputValue);
+                    }}
                     className={`text-sm font-normal w-full rounded-md border ${
                         error ? 'border-red-500' : 'border-white/10'
                     } bg-background-secondary px-2 py-1 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}

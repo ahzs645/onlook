@@ -90,6 +90,10 @@ export class SandboxManager {
         await this.sync.start();
         await this.ensurePreloadScriptExists();
         await this.fs.rebuildIndex();
+        await Promise.allSettled([
+            this.editorEngine.theme.scanConfig(),
+            this.editorEngine.pages.scanPages(),
+        ]);
     }
 
     private async ensurePreloadScriptExists(): Promise<void> {

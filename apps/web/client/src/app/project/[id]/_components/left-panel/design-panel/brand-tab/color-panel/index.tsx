@@ -138,6 +138,14 @@ const ColorPanel = observer(() => {
                             initialName=""
                             onSubmit={handleAddNewGroup}
                             onCancel={() => setIsAddingNewGroup(false)}
+                            onBlur={(value) => {
+                                const nextValue = value.trim();
+                                if (!nextValue) {
+                                    setIsAddingNewGroup(false);
+                                    return;
+                                }
+                                void handleAddNewGroup(nextValue);
+                            }}
                         />
                     </div>
                 ) : (
