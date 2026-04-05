@@ -181,6 +181,7 @@ export function DesktopProjectsHome() {
     const canOpenSelectedProject = Boolean(
         selectedProject && selectedProject.isValid && selectedProject.exists,
     );
+    const isLaunchingProject = Boolean(launchingProjectId);
 
     const handleChooseFolder = async () => {
         if (!desktop) {
@@ -225,9 +226,8 @@ export function DesktopProjectsHome() {
                 recentProjects.find((entry) => entry.id === targetProjectId)?.sessionId ?? null;
             router.push(getDesktopLocalProjectRoute(targetProjectId, activeSessionId));
         } catch (cause) {
-            setError(cause instanceof Error ? cause.message : 'Failed to launch local project');
-        } finally {
             setLaunchingProjectId(null);
+            setError(cause instanceof Error ? cause.message : 'Failed to launch local project');
         }
     };
 
@@ -557,6 +557,19 @@ export function DesktopProjectsHome() {
                     </section>
                 )}
             </div>
+            {isLaunchingProject && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#08090b]/92 backdrop-blur-sm">
+                    <div className="flex max-w-lg flex-col items-center gap-4 px-6 text-center text-white">
+                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                        <div className="space-y-1">
+                            <h1 className="text-lg font-medium">Loading desktop project</h1>
+                            <p className="text-sm text-white/68">
+                                Preparing the local editor and preview before the project page loads.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </main>
     );
 }

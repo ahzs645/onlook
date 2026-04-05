@@ -146,6 +146,7 @@ const DesktopSelectProject = ({
         () => recentProjects.map((project) => toDesktopPresentationProject(project)),
         [recentProjects],
     );
+    const isLaunchingProject = Boolean(launchingProjectId);
 
     const handleCreateProject = async () => {
         if (!desktop || !isDesktop) {
@@ -163,11 +164,10 @@ const DesktopSelectProject = ({
             setLaunchingProjectId(project.id);
             router.push(getDesktopLocalProjectRoute(project.id, project.sessionId));
         } catch (error) {
+            setLaunchingProjectId(null);
             toast.error(
                 error instanceof Error ? error.message : 'Failed to open local project',
             );
-        } finally {
-            setLaunchingProjectId(null);
         }
     };
 
@@ -193,11 +193,10 @@ const DesktopSelectProject = ({
                 ),
             );
         } catch (error) {
+            setLaunchingProjectId(null);
             toast.error(
                 error instanceof Error ? error.message : 'Failed to launch local project',
             );
-        } finally {
-            setLaunchingProjectId(null);
         }
     };
 
@@ -219,7 +218,7 @@ const DesktopSelectProject = ({
     };
 
     return (
-        <div className="w-full">
+        <div className="relative w-full">
             {!isDesktop && !isResolving && (
                 <div className="mx-auto mt-6 w-full max-w-6xl rounded-lg border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100/90">
                     Open this route in the desktop shell to browse and launch local projects.
@@ -240,6 +239,19 @@ const DesktopSelectProject = ({
                     void handleDeleteProject(project);
                 }}
             />
+            {isLaunchingProject && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/92 backdrop-blur-sm">
+                    <div className="flex max-w-lg flex-col items-center gap-4 px-6 text-center text-foreground">
+                        <Icons.LoadingSpinner className="h-6 w-6 animate-spin text-foreground-primary" />
+                        <div className="space-y-1">
+                            <h1 className="text-lg font-medium">Loading desktop project</h1>
+                            <p className="text-sm text-foreground-secondary">
+                                Preparing the local editor and preview before the project page loads.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

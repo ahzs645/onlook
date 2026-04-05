@@ -129,15 +129,8 @@ export class ChatContext {
         return (await Promise.all(
             context.map(async (c) => {
                 if (c.type === MessageContextType.FILE && 'branchId' in c && c.branchId) {
-                    const branchData = this.editorEngine.branches.getBranchDataById(c.branchId);
-                    if (!branchData) {
-                        console.warn(`No branch data found for branchId: ${c.branchId}`);
-                        return c;
-                    }
-
-                    const fileContent = await branchData.codeEditor.readFile(c.path);
-                    if (fileContent instanceof Uint8Array) {
-                        console.error('File is binary', c.path);
+                    const fileContent = await this.readTextFile(c.path, c.branchId);
+                    if (fileContent === null) {
                         return c;
                     }
                     return { ...c, content: fileContent } satisfies FileMessageContext;
@@ -170,15 +163,8 @@ export class ChatContext {
         });
 
         for (const [filePath, branchId] of filePathToBranch) {
-            const branchData = this.editorEngine.branches.getBranchDataById(branchId);
-            if (!branchData) {
-                console.warn(`No branch data found for branchId: ${branchId}`);
-                continue;
-            }
-
-            const content = await branchData.codeEditor.readFile(filePath);
-            if (content instanceof Uint8Array) {
-                console.error('File is binary', filePath);
+            const content = await this.readTextFile(filePath, branchId);
+            if (content === null) {
                 continue;
             }
             fileContext.push({
@@ -357,23 +343,10 @@ export class ChatContext {
                 return null;
             }
 
-            const branchData = this.editorEngine.branches.getBranchDataById(activeBranchId);
-            if (!branchData) {
-                console.error(`No branch data found for activeBranchId: ${activeBranchId}`);
-                return null;
-            }
-
             const pagePaths = ['./app/page.tsx', './src/app/page.tsx'];
             for (const pagePath of pagePaths) {
-                let fileContent: string | Uint8Array | null = null;
-                try {
-                    fileContent = await branchData.codeEditor.readFile(pagePath);
-                } catch (error) {
-                    console.error('Error getting default page context', error);
-                    continue;
-                }
-
-                if (fileContent && typeof fileContent === 'string') {
+                const fileContent = await this.readTextFile(pagePath, activeBranchId);
+                if (fileContent !== null) {
                     const defaultPageContext: FileMessageContext = {
                         type: MessageContextType.FILE,
                         path: pagePath,
@@ -387,6 +360,34 @@ export class ChatContext {
             return null;
         } catch (error) {
             console.error('Error getting default page context', error);
+            return null;
+        }
+    }
+
+    private async readTextFile(path: string, branchId?: string): Promise<string | null> {
+        if (branchId) {
+            const branchData = this.editorEngine.branches.getBranchDataById(branchId);
+            if (branchData) {
+                try {
+                    const branchContent = await branchData.codeEditor.readFile(path);
+                    if (typeof branchContent === 'string') {
+                        return branchContent;
+                    }
+                } catch {
+                    // Fall back to the active sandbox when the cached branch reader is stale.
+                }
+            }
+        }
+
+        const activeBranchId = this.editorEngine.branches.activeBranch?.id;
+        if (branchId && activeBranchId && branchId !== activeBranchId) {
+            return null;
+        }
+
+        try {
+            const sandboxContent = await this.editorEngine.activeSandbox.readFile(path);
+            return typeof sandboxContent === 'string' ? sandboxContent : null;
+        } catch {
             return null;
         }
     }
