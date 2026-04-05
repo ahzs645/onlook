@@ -33,7 +33,7 @@ export const GestureScreen = observer(({ frame, isResizing }: { frame: Frame, is
             try {
                 const frameData = getFrameData();
                 if (!frameData?.view) {
-                    throw new Error('Frame view not found');
+                    return;
                 }
                 const pos = getRelativeMousePosition(e);
                 const shouldGetStyle = [MouseAction.MOUSE_DOWN, MouseAction.DOUBLE_CLICK].includes(
@@ -45,7 +45,12 @@ export const GestureScreen = observer(({ frame, isResizing }: { frame: Frame, is
                     shouldGetStyle,
                 );
                 if (!el) {
-                    throw new Error('No element found');
+                    if (action === MouseAction.MOVE) {
+                        editorEngine.elements.clearHoveredElement();
+                        editorEngine.overlay.state.removeHoverRect();
+                        editorEngine.overlay.removeMeasurement();
+                    }
+                    return;
                 }
 
                 switch (action) {

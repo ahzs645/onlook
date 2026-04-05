@@ -106,6 +106,17 @@ const DesktopSelectProject = ({
     }, [desktop]);
 
     useEffect(() => {
+        for (const project of recentProjects.slice(0, 3)) {
+            router.prefetch(
+                getDesktopLocalProjectRoute(
+                    project.id,
+                    project.sessionId,
+                ),
+            );
+        }
+    }, [recentProjects, router]);
+
+    useEffect(() => {
         if (typeof window === 'undefined') {
             return;
         }

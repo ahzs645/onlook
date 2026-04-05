@@ -665,17 +665,9 @@ export function useDesktopLocalChat({
                     return;
                 }
                 case 'turn.completed': {
-                    const lastAssistantMessage = messagesRef.current.findLast(
-                        (message) => message.role === 'assistant',
-                    );
-                    if (!lastAssistantMessage && rawOutputRef.current.trim()) {
-                        finalizeCommand(
-                            'error',
-                            new Error(rawOutputRef.current.trim() || 'Desktop local chat failed'),
-                        );
-                        return;
-                    }
-                    finalizeCommand('end_turn');
+                    // Codex may emit turn.completed before the final assistant item lands.
+                    // Let the wrapped command exit sentinel decide completion so late output
+                    // is not dropped by clearing the active command too early.
                     return;
                 }
             }
