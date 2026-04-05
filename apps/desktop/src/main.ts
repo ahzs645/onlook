@@ -183,6 +183,12 @@ class ManagedProcess {
         child.stdout.setEncoding('utf8');
         child.stderr.setEncoding('utf8');
 
+        // Background commands and one-shot commands are non-interactive. Closing stdin
+        // avoids CLIs treating the inherited pipe as pending prompt input.
+        if (this.kind === 'command') {
+            child.stdin.end();
+        }
+
         child.stdout.on('data', (chunk: string) => this.emitOutput(chunk));
         child.stderr.on('data', (chunk: string) => this.emitOutput(chunk));
         child.on('close', (code, signal) => {
@@ -476,7 +482,6 @@ class DesktopProjectRuntime {
             this.createProcessEnv(),
             'command',
         );
-        await proc.start();
         this.commands.set(commandId, proc);
         return proc;
     }
@@ -1390,6 +1395,15 @@ function getRuntimeBySessionId(sessionId: string) {
     return runtimesById.get(sessionId) ?? null;
 }
 
+function getRuntimeByFolderPath(folderPath: string) {
+    const runtimeId = runtimeIdByFolderPath.get(folderPath);
+    if (!runtimeId) {
+        return null;
+    }
+
+    return runtimesById.get(runtimeId) ?? null;
+}
+
 function createWindow(initialUrl?: string) {
     const win = new BrowserWindow({
         width: 1440,
@@ -1543,6 +1557,13 @@ ipcMain.handle('desktop:launch-project', async (_event, folderPath: string) => {
         throw new Error('Folder path is required');
     }
 
+    const existingRuntime = getRuntimeByFolderPath(folderPath);
+    if (existingRuntime) {
+        await existingRuntime.start();
+        await saveRecentProject(existingRuntime.toSession());
+        return existingRuntime.toSession();
+    }
+
     const summary = await inspectProject(folderPath);
     if (!summary.isValid) {
         throw new Error(summary.error ?? 'Project is not valid');
@@ -1562,6 +1583,13 @@ ipcMain.handle('desktop:launch-project-by-id', async (_event, projectId: string)
     const record = await getStoredProjectRecord(projectId);
     if (!record) {
         throw new Error('Desktop project not found');
+    }
+
+    const existingRuntime = getRuntimeByFolderPath(record.folderPath);
+    if (existingRuntime) {
+        await existingRuntime.start();
+        await saveRecentProject(existingRuntime.toSession(), record.id);
+        return existingRuntime.toSession();
     }
 
     const summary = await inspectProject(record.folderPath);

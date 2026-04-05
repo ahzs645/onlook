@@ -4,7 +4,12 @@ import type { NodePath, T } from './packages';
 import { isReactFragment } from './helpers';
 import { generate, parse, t, traverse } from './packages';
 
-export function getAstFromContent(content: string): T.File | null {
+export function getAstFromContent(
+    content: string,
+    options?: {
+        silent?: boolean;
+    },
+): T.File | null {
     try {
         return parse(content, {
             sourceType: 'module',
@@ -18,7 +23,9 @@ export function getAstFromContent(content: string): T.File | null {
             ],
         });
     } catch (e) {
-        console.error(e);
+        if (!options?.silent) {
+            console.error(e);
+        }
         return null;
     }
 }

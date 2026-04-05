@@ -9,7 +9,7 @@ import {
 } from '@/utils/desktop-local-chat';
 import { isDesktopLocalProjectId } from '@/utils/desktop-local';
 import { type ChatConversation } from '@onlook/models';
-import { makeAutoObservable } from 'mobx';
+import { makeAutoObservable, runInAction } from 'mobx';
 import { toast } from 'sonner';
 import type { EditorEngine } from '../engine';
 
@@ -27,7 +27,9 @@ export class ConversationManager {
     }
 
     async applyConversations(conversations: ChatConversation[]) {
-        this.conversations = conversations;
+        runInAction(() => {
+            this.conversations = conversations;
+        });
         if (conversations.length > 0 && conversations[0]) {
             const conversation = conversations[0];
             await this.selectConversation(conversation.id);
@@ -73,18 +75,22 @@ export class ConversationManager {
                 : await api.chat.conversation.upsert.mutate({
                     projectId: this.editorEngine.projectId,
                 });
-            this.current = {
-                ...newConversation,
-                messageCount: 0,
-            };
-            this.conversations.push(newConversation);
+            runInAction(() => {
+                this.current = {
+                    ...newConversation,
+                    messageCount: 0,
+                };
+                this.conversations.push(newConversation);
+            });
         } catch (error) {
             console.error('Error starting new conversation', error);
             toast.error('Error starting new conversation.', {
                 description: error instanceof Error ? error.message : 'Unknown error',
             });
         } finally {
-            this.creatingConversation = false;
+            runInAction(() => {
+                this.creatingConversation = false;
+            });
         }
     }
 
@@ -95,10 +101,12 @@ export class ConversationManager {
             return;
         }
 
-        this.current = {
-            ...match,
-            messageCount: 0,
-        };
+        runInAction(() => {
+            this.current = {
+                ...match,
+                messageCount: 0,
+            };
+        });
     }
 
     deleteConversation(id: string) {
@@ -139,18 +147,19 @@ export class ConversationManager {
             return;
         }
         // Update local active conversation 
-        this.current = {
-            ...this.current,
-            title,
-        };
-        // Update in local conversations list
-        const index = this.conversations.findIndex((c) => c.id === this.current?.id);
-        if (index !== -1 && this.conversations[index]) {
-            this.conversations[index] = {
-                ...this.conversations[index],
+        runInAction(() => {
+            this.current = {
+                ...this.current!,
                 title,
             };
-        }
+            const index = this.conversations.findIndex((c) => c.id === this.current?.id);
+            if (index !== -1 && this.conversations[index]) {
+                this.conversations[index] = {
+                    ...this.conversations[index],
+                    title,
+                };
+            }
+        });
         if (isDesktopLocalProjectId(this.editorEngine.projectId)) {
             await updateDesktopLocalConversation(this.editorEngine.projectId, this.current.id, {
                 title,

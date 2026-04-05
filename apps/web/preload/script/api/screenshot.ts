@@ -18,8 +18,14 @@ export async function captureScreenshot(): Promise<{
         canvas.width = viewportWidth;
         canvas.height = viewportHeight;
 
-        // Try modern getDisplayMedia API first (if available in this context)
-        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+        const canUseDisplayCapture =
+            window.self === window.top &&
+            navigator.mediaDevices &&
+            typeof navigator.mediaDevices.getDisplayMedia === 'function';
+
+        // Try modern getDisplayMedia only in a top-level browsing context.
+        // Embedded previews are blocked by permissions policy and would spam the console.
+        if (canUseDisplayCapture) {
             try {
                 const stream = await navigator.mediaDevices.getDisplayMedia({
                     video: {
@@ -46,13 +52,12 @@ export async function captureScreenshot(): Promise<{
 
                 // Convert canvas to base64 string with compression
                 const base64 = await compressImage(canvas);
-                console.log(`Screenshot captured - Size: ~${Math.round((base64.length * 0.75) / 1024)} KB`);
                 return {
                     mimeType: 'image/jpeg',
                     data: base64,
                 };
             } catch (displayError) {
-                console.log('getDisplayMedia failed, falling back to DOM rendering:', displayError);
+                void displayError;
             }
         }
 
@@ -61,7 +66,6 @@ export async function captureScreenshot(): Promise<{
 
         // Convert canvas to base64 string with compression
         const base64 = await compressImage(canvas);
-        console.log(`DOM screenshot captured - Size: ~${Math.round((base64.length * 0.75) / 1024)} KB`);
         return {
             mimeType: 'image/jpeg',
             data: base64,

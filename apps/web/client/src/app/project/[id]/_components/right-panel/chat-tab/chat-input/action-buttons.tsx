@@ -13,6 +13,11 @@ export const ActionButtons = ({
     handleImageEvent: (file: File, fileName: string) => Promise<void>;
     handleScreenshot: () => Promise<void>;
 }) => {
+    const blurActiveElement = () => {
+        if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+        }
+    };
 
     const handleOpenFileDialog = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -33,7 +38,14 @@ export const ActionButtons = ({
     };
 
     return (
-        <DropdownMenu>
+        <DropdownMenu
+            modal={false}
+            onOpenChange={(open) => {
+                if (open) {
+                    blurActiveElement();
+                }
+            }}
+        >
             <Tooltip>
                 <TooltipTrigger asChild>
                     <DropdownMenuTrigger asChild>
@@ -44,6 +56,7 @@ export const ActionButtons = ({
                             disabled={disabled}
                             onMouseDown={(e) => {
                                 e.currentTarget.blur();
+                                blurActiveElement();
                             }}
                         >
                             <Icons.Image

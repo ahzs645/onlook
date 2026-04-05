@@ -6,8 +6,7 @@ import { useEffect, useState } from 'react';
 
 import {
     type DesktopRecentProject,
-    DESKTOP_LOCAL_PROJECT_QUERY_KEY,
-    DESKTOP_LOCAL_SESSION_QUERY_KEY,
+    getDesktopLocalProjectRoute,
 } from '@/utils/desktop-local';
 import { useDesktopBridge } from '@/app/desktop/use-desktop-bridge';
 
@@ -222,15 +221,9 @@ export function DesktopProjectsHome() {
         try {
             setLaunchingProjectId(targetProjectId);
             setError(null);
-
-            const session = await desktop.launchProjectById(targetProjectId);
-            await refreshProjects(targetProjectId);
-
-            const search = new URLSearchParams({
-                [DESKTOP_LOCAL_PROJECT_QUERY_KEY]: targetProjectId,
-                [DESKTOP_LOCAL_SESSION_QUERY_KEY]: session.id,
-            });
-            router.push(`/desktop/project?${search.toString()}`);
+            const activeSessionId =
+                recentProjects.find((entry) => entry.id === targetProjectId)?.sessionId ?? null;
+            router.push(getDesktopLocalProjectRoute(targetProjectId, activeSessionId));
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : 'Failed to launch local project');
         } finally {

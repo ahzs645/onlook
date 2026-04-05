@@ -80,6 +80,30 @@ type CodexEvent = {
     message?: string;
 };
 
+type GeminiEvent = {
+    type?: string;
+    session_id?: string;
+    model?: string;
+    role?: string;
+    content?: string;
+    delta?: boolean;
+    status?: string;
+    error?: string | { message?: string };
+};
+
+type BackgroundCommandExitEvent = {
+    type: 'onlook.command.exit';
+    status?: number;
+};
+
+const BACKGROUND_COMMAND_EXIT_EVENT_TYPE = 'onlook.command.exit';
+
+function isBackgroundCommandExitEvent(
+    event: ClaudeEvent | CodexEvent | GeminiEvent | BackgroundCommandExitEvent,
+): event is BackgroundCommandExitEvent {
+    return event.type === BACKGROUND_COMMAND_EXIT_EVENT_TYPE;
+}
+
 type MessageFinishReason = NonNullable<ChatMessage['metadata']>['finishReason'];
 
 function shellQuote(value: string) {
@@ -130,6 +154,22 @@ function getCodexErrorMessage(event: CodexEvent): string | null {
     return null;
 }
 
+function getGeminiErrorMessage(event: GeminiEvent): string | null {
+    if (typeof event.error === 'string' && event.error.trim()) {
+        return event.error.trim();
+    }
+
+    if (event.error && typeof event.error === 'object' && typeof event.error.message === 'string') {
+        return event.error.message.trim();
+    }
+
+    if (typeof event.content === 'string' && event.content.trim()) {
+        return event.content.trim();
+    }
+
+    return null;
+}
+
 function normalizeFinishReason(reason: string): MessageFinishReason {
     switch (reason) {
         case 'stop':
@@ -144,6 +184,10 @@ function normalizeFinishReason(reason: string): MessageFinishReason {
         default:
             return undefined;
     }
+}
+
+function wrapDesktopLocalCommand(commandText: string) {
+    return `(${commandText}); __onlook_status=$?; printf '\\n{"type":"${BACKGROUND_COMMAND_EXIT_EVENT_TYPE}","status":%s}\\n' "$__onlook_status"`;
 }
 
 function getSessionStatusForReason(
@@ -454,6 +498,48 @@ export function useDesktopLocalChat({
         [clearActiveCommand, finalizeAssistantMessage, persistSessionState],
     );
 
+    const handleBackgroundCommandExit = useCallback(
+        (event: BackgroundCommandExitEvent) => {
+            const exitStatus = typeof event.status === 'number' ? event.status : 1;
+            const rawOutput = rawOutputRef.current.trim();
+            const hasAssistantMessage = messagesRef.current.some(
+                (message) =>
+                    message.role === 'assistant'
+                    && (
+                        message.id === activeAssistantMessageIdRef.current
+                        || message.metadata?.turnId === activeTurnIdRef.current
+                    ),
+            );
+
+            if (exitStatus !== 0) {
+                finalizeCommand(
+                    'error',
+                    new Error(rawOutput || 'Desktop local chat failed'),
+                );
+                return;
+            }
+
+            if (!hasAssistantMessage && rawOutput) {
+                upsertAssistantMessage(rawOutput, 'replace', {
+                    streaming: false,
+                    completedAt: new Date(),
+                    finishReason: normalizeFinishReason('end_turn'),
+                });
+            }
+
+            if (!hasAssistantMessage && !rawOutput) {
+                finalizeCommand(
+                    'error',
+                    new Error('Desktop local chat exited without producing a response'),
+                );
+                return;
+            }
+
+            finalizeCommand('end_turn');
+        },
+        [finalizeCommand, upsertAssistantMessage],
+    );
+
     const processClaudeEvent = useCallback(
         (event: ClaudeEvent) => {
             switch (event.type) {
@@ -597,6 +683,50 @@ export function useDesktopLocalChat({
         [finalizeCommand, persistSessionState, upsertAssistantMessage],
     );
 
+    const processGeminiEvent = useCallback(
+        (event: GeminiEvent) => {
+            switch (event.type) {
+                case 'init':
+                    if (event.session_id) {
+                        setStatus('streaming');
+                        void persistSessionState({
+                            status: 'running',
+                            providerName: 'gemini',
+                            model: activeModelRef.current ?? event.model ?? null,
+                            reasoningEffort: null,
+                            sessionId: event.session_id,
+                            activeTurnId: activeTurnIdRef.current,
+                            startedAt: activeTurnStartedAtRef.current,
+                            lastError: null,
+                            updatedAt: new Date(),
+                        });
+                    }
+                    return;
+                case 'message':
+                    if (event.role === 'assistant' && typeof event.content === 'string') {
+                        setStatus('streaming');
+                        upsertAssistantMessage(
+                            event.content,
+                            event.delta ? 'append' : 'replace',
+                            {
+                                streaming: true,
+                            },
+                        );
+                    }
+                    return;
+                case 'result':
+                    if (event.status && event.status !== 'success') {
+                        const message = getGeminiErrorMessage(event) || rawOutputRef.current.trim();
+                        finalizeCommand('error', new Error(message || 'Desktop local chat failed'));
+                        return;
+                    }
+                    finalizeCommand('end_turn');
+                    return;
+            }
+        },
+        [finalizeCommand, persistSessionState, upsertAssistantMessage],
+    );
+
     const processOutputChunk = useCallback(
         (chunk: string) => {
             if (!chunk) {
@@ -618,9 +748,19 @@ export function useDesktopLocalChat({
                 }
 
                 try {
-                    const parsed = JSON.parse(line) as ClaudeEvent | CodexEvent;
+                    const parsed = JSON.parse(line) as
+                        | ClaudeEvent
+                        | CodexEvent
+                        | GeminiEvent
+                        | BackgroundCommandExitEvent;
+                    if (isBackgroundCommandExitEvent(parsed)) {
+                        handleBackgroundCommandExit(parsed);
+                        continue;
+                    }
                     if (activeCliRef.current === 'codex') {
                         processCodexEvent(parsed as CodexEvent);
+                    } else if (activeCliRef.current === 'gemini') {
+                        processGeminiEvent(parsed as GeminiEvent);
                     } else {
                         processClaudeEvent(parsed as ClaudeEvent);
                     }
@@ -629,7 +769,12 @@ export function useDesktopLocalChat({
                 }
             }
         },
-        [processClaudeEvent, processCodexEvent],
+        [
+            handleBackgroundCommandExit,
+            processClaudeEvent,
+            processCodexEvent,
+            processGeminiEvent,
+        ],
     );
 
     const runCli = useCallback(
@@ -648,7 +793,7 @@ export function useDesktopLocalChat({
             const selection = pickerState.selection;
             if (!selection) {
                 throw new Error(
-                    'No supported local AI CLI was found. Install Claude (`claude`) or Codex (`codex`) to use desktop-local chat.',
+                    'No supported local AI CLI was found. Install Claude (`claude`), Codex (`codex`), or Gemini (`gemini`) to use desktop-local chat.',
                 );
             }
             const provider = editorEngine.activeSandbox.session.provider;
@@ -699,18 +844,22 @@ export function useDesktopLocalChat({
                 ? ` -c model_reasoning_effort=${shellQuote(selection.reasoningEffort)}`
                 : '';
             const resumeSessionId = shouldResume ? pickerState.session.sessionId : null;
-            const commandText = selection.cli === 'claude'
-                ? `claude -p --model ${modelArg}${resumeSessionId ? ` --resume ${shellQuote(resumeSessionId)}` : ''} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions ${promptArg}`
-                : resumeSessionId
-                    ? `codex exec resume --json -m ${modelArg}${codexReasoningEffortArg} --dangerously-bypass-approvals-and-sandbox ${shellQuote(resumeSessionId)} ${promptArg}`
-                    : `codex exec --json -m ${modelArg}${codexReasoningEffortArg} --dangerously-bypass-approvals-and-sandbox ${promptArg}`;
+            const commandText =
+                selection.cli === 'claude'
+                    ? `claude -p --model ${modelArg}${resumeSessionId ? ` --resume ${shellQuote(resumeSessionId)}` : ''} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions ${promptArg}`
+                    : selection.cli === 'codex'
+                        ? resumeSessionId
+                            ? `codex exec resume --json -m ${modelArg}${codexReasoningEffortArg} --dangerously-bypass-approvals-and-sandbox ${shellQuote(resumeSessionId)} ${promptArg}`
+                            : `codex exec --json -m ${modelArg}${codexReasoningEffortArg} --dangerously-bypass-approvals-and-sandbox ${promptArg}`
+                        : `gemini --prompt ${promptArg} --model ${modelArg}${resumeSessionId ? ` --resume ${shellQuote(resumeSessionId)}` : ''} --output-format stream-json --approval-mode yolo --sandbox false`;
+            const wrappedCommandText = wrapDesktopLocalCommand(commandText);
 
             activeCliRef.current = selection.cli;
             activeModelRef.current = selection.model;
             activeReasoningEffortRef.current = selection.reasoningEffort;
             const commandResult = await provider.runBackgroundCommand({
                 args: {
-                    command: commandText,
+                    command: wrappedCommandText,
                 },
             });
 
@@ -718,11 +867,12 @@ export function useDesktopLocalChat({
             const unsubscribe = command.onOutput((chunk) => {
                 processOutputChunk(chunk);
             });
-
             activeCommandRef.current = {
                 kill: () => command.kill(),
                 unsubscribe,
             };
+            const initialOutput = await command.open();
+            processOutputChunk(initialOutput);
         },
         [
             conversationId,

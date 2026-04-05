@@ -1,5 +1,5 @@
 import { EditorMode, type CodeNavigationTarget } from "@onlook/models";
-import { makeAutoObservable } from "mobx";
+import { makeAutoObservable, runInAction } from "mobx";
 import type { EditorEngine } from "../engine";
 
 export class IdeManager {
@@ -31,7 +31,6 @@ export class IdeManager {
             // Get element metadata
             const metadata = await branchData.codeEditor.getJsxElementMetadata(oid);
             if (!metadata) {
-                console.warn(`[IdeManager] No metadata found for OID: ${oid}`);
                 return;
             }
 
@@ -51,17 +50,19 @@ export class IdeManager {
             };
 
             // Set the override to trigger navigation
-            this._codeNavigationOverride = target;
-
-            // Switch to code tab
-            this.editorEngine.state.editorMode = EditorMode.CODE;
+            runInAction(() => {
+                this._codeNavigationOverride = target;
+                this.editorEngine.state.editorMode = EditorMode.CODE;
+            });
         } catch (error) {
             console.error('[IdeManager] Error opening code block:', error);
         }
     }
 
     clearCodeNavigationOverride() {
-        this._codeNavigationOverride = null;
+        runInAction(() => {
+            this._codeNavigationOverride = null;
+        });
     }
 
     hasCodeNavigationOverride(): boolean {

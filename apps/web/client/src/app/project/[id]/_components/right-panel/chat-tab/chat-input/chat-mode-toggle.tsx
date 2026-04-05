@@ -18,7 +18,14 @@ export const ChatModeToggle = observer(({ chatMode, onChatModeChange, disabled =
     const [isOpen, setIsOpen] = useState(false);
 
     useEffect(() => {
+        const blurActiveElement = () => {
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+        };
+
         const handleOpenMenu = () => {
+            blurActiveElement();
             setIsOpen(true);
         };
 
@@ -35,9 +42,23 @@ export const ChatModeToggle = observer(({ chatMode, onChatModeChange, disabled =
         };
 
         const Icon = getCurrentModeIcon();
+        const blurActiveElement = () => {
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+        };
 
         return (
-            <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+            <DropdownMenu
+                modal={false}
+                open={isOpen}
+                onOpenChange={(open) => {
+                    if (open) {
+                        blurActiveElement();
+                    }
+                    setIsOpen(open);
+                }}
+            >
                 <HoverOnlyTooltip 
                     className='mb-1'
                     content={
@@ -57,6 +78,9 @@ export const ChatModeToggle = observer(({ chatMode, onChatModeChange, disabled =
                                 'h-8 px-2 text-foreground-onlook group flex items-center gap-1.5',
                                 disabled && 'opacity-50 cursor-not-allowed'
                             )}
+                            onMouseDown={() => {
+                                blurActiveElement();
+                            }}
                         >
                             <Icon 
                                 className={cn(

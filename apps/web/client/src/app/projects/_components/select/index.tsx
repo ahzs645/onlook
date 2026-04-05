@@ -150,10 +150,7 @@ const DesktopSelectProject = ({
 
             const project = await desktop.saveProject(folderPath);
             setLaunchingProjectId(project.id);
-            const session = await desktop.launchProjectById(project.id);
-            await refreshProjects(project.id);
-
-            router.push(getDesktopLocalProjectRoute(project.id, session.id));
+            router.push(getDesktopLocalProjectRoute(project.id, project.sessionId));
         } catch (error) {
             toast.error(
                 error instanceof Error ? error.message : 'Failed to open local project',
@@ -178,10 +175,12 @@ const DesktopSelectProject = ({
         try {
             setActiveProjectId(targetProject.id);
             setLaunchingProjectId(targetProject.id);
-            const session = await desktop.launchProjectById(targetProject.id);
-            await refreshProjects(targetProject.id);
-
-            router.push(getDesktopLocalProjectRoute(targetProject.id, session.id));
+            router.push(
+                getDesktopLocalProjectRoute(
+                    targetProject.id,
+                    targetProject.sessionId,
+                ),
+            );
         } catch (error) {
             toast.error(
                 error instanceof Error ? error.message : 'Failed to launch local project',

@@ -27,7 +27,6 @@ export function getActionElementFromHtmlElement(el: HTMLElement): ActionElement 
 
     const oid = getInstanceId(el) || getOid(el) || null;
     if (!oid) {
-        console.warn('Element has no oid');
         return null;
     }
 
@@ -58,7 +57,6 @@ export function getActionLocation(domId: string): ActionLocation | null {
 
     const targetOid = getInstanceId(parent) || getOid(parent);
     if (!targetOid) {
-        console.warn('Parent element has no oid');
         return null;
     }
 

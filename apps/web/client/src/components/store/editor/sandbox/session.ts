@@ -43,8 +43,12 @@ export class SessionManager {
             const provider = await this.createProvider(sandboxId, userId);
             runInAction(() => {
                 this.provider = provider;
+                this.isConnecting = false;
             });
-            await this.createTerminalSessions(provider);
+
+            // Terminal/task panes are secondary UI. They should not block the editor
+            // from becoming ready once the provider is available.
+            void this.createTerminalSessions(provider);
         };
 
         let lastError: Error | null = null;
@@ -52,9 +56,6 @@ export class SessionManager {
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
                 await attemptConnection();
-                runInAction(() => {
-                    this.isConnecting = false;
-                });
                 return;
             } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
@@ -107,6 +108,10 @@ export class SessionManager {
     }
 
     async createTerminalSessions(provider: Provider) {
+        if (this.terminalSessions.size > 0) {
+            return;
+        }
+
         const task = new CLISessionImpl(
             'server',
             CLISessionType.TASK,

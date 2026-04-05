@@ -52,6 +52,7 @@ export const FrameView = observer(({ frame, isInDragSelection = false }: { frame
         handleConnectionFailed,
         handleConnectionSuccess,
         getPenpalTimeout,
+        isPenpalConnected,
     } = useFrameReload();
 
     const { hasTimedOut, isConnecting } = useSandboxTimeout(frame, handleConnectionFailed);
@@ -59,7 +60,8 @@ export const FrameView = observer(({ frame, isInDragSelection = false }: { frame
     const isSelected = editorEngine.frames.isSelected(frame.id);
     const branchData = editorEngine.branches.getBranchDataById(frame.branchId);
     const preloadScriptReady = branchData?.sandbox?.preloadScriptState === PreloadScriptState.INJECTED;
-    const isFrameReady = preloadScriptReady && !(isConnecting && !hasTimedOut);
+    const isFrameReady =
+        isPenpalConnected || (preloadScriptReady && !(isConnecting && !hasTimedOut));
 
     useEffect(() => {
         if (isFrameReady) {

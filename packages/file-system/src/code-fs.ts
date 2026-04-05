@@ -63,7 +63,7 @@ export class CodeFileSystem extends FileSystem {
         let processedContent = content;
         let shouldUpdateMetadata = false;
 
-        const ast = getAstFromContent(content);
+        const ast = getAstFromContent(content, { silent: true });
         if (ast) {
             if (isRootLayoutFile(path, this.options.routerType)) {
                 injectPreloadScript(ast);
@@ -117,7 +117,7 @@ export class CodeFileSystem extends FileSystem {
             }
         }
 
-        const ast = getAstFromContent(content);
+        const ast = getAstFromContent(content, { silent: true });
         if (!ast) return;
 
         const templateNodeMap = createTemplateNodeMap({
@@ -163,7 +163,7 @@ export class CodeFileSystem extends FileSystem {
                     try {
                         const content = await this.readFile(entry.path);
                         if (typeof content === 'string') {
-                            const ast = getAstFromContent(content);
+                            const ast = getAstFromContent(content, { silent: true });
                             if (!ast) return;
 
                             const templateNodeMap = createTemplateNodeMap({
@@ -272,8 +272,16 @@ export class CodeFileSystem extends FileSystem {
             return false;
         }
         if (
-            path.includes('/public/docs/_astro/')
+            path.includes('/public/docs/')
+            || path.includes('/public/vendor/')
+            || path.includes('/docs/starlight/dist/')
             || path.includes('/docs/starlight/.astro/')
+            || path.includes('/docs/starlight/node_modules/')
+            || path.includes('/.next-prod/')
+            || path.includes('/pagefind/')
+            || path.includes('/_astro/')
+            || path.endsWith('/component-sources.generated.ts')
+            || path.includes('.generated.')
         ) {
             return false;
         }

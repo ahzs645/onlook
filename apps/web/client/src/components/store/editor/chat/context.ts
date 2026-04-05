@@ -260,7 +260,6 @@ export class ChatContext {
 
         const metadata = await branchData.codeEditor.getJsxElementMetadata(id);
         if (!metadata) {
-            console.error('No metadata found for id', id, 'tagName:', tagName);
             return null;
         }
 

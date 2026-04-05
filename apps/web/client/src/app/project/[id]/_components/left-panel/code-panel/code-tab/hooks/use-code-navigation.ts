@@ -58,20 +58,23 @@ export function useCodeNavigation() {
 
                     const oid = selectedElement.instanceId ?? selectedElement.oid;
                     if (!oid) {
-                        console.warn('[CodeNavigation] No OID found for selected element');
+                        savedNavigationTarget.current = null;
+                        setNavigationTarget(null);
                         return;
                     }
 
                     try {
                         const branchData = editorEngine.branches.getBranchDataById(selectedElement.branchId);
                         if (!branchData) {
-                            console.warn(`[CodeNavigation] No branch data found for branchId: ${selectedElement.branchId}`);
+                            savedNavigationTarget.current = null;
+                            setNavigationTarget(null);
                             return;
                         }
 
                         const metadata = await branchData.codeEditor.getJsxElementMetadata(oid);
                         if (!metadata) {
-                            console.warn(`[CodeNavigation] No metadata found for OID: ${oid}`);
+                            savedNavigationTarget.current = null;
+                            setNavigationTarget(null);
                             return;
                         }
 

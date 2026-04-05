@@ -12,7 +12,7 @@ import { isDesktopLocalProjectId, parseDesktopLocalProjectId } from './desktop-l
 
 const DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
 
-export type DesktopLocalChatCli = 'claude' | 'codex';
+export type DesktopLocalChatCli = 'claude' | 'codex' | 'gemini';
 export type DesktopLocalChatCodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type DesktopLocalChatSessionStatus =
     | 'idle'
@@ -85,11 +85,12 @@ interface DesktopLocalChatStore {
 
 type ChatMessageMetadata = NonNullable<ChatMessage['metadata']>;
 
-const DESKTOP_LOCAL_CHAT_CLI_ORDER = ['claude', 'codex'] as const satisfies readonly DesktopLocalChatCli[];
+const DESKTOP_LOCAL_CHAT_CLI_ORDER = ['claude', 'codex', 'gemini'] as const satisfies readonly DesktopLocalChatCli[];
 
 export const DESKTOP_LOCAL_CHAT_PROVIDER_LABELS: Record<DesktopLocalChatCli, string> = {
     claude: 'Claude',
     codex: 'Codex',
+    gemini: 'Gemini',
 };
 
 export const DESKTOP_LOCAL_CHAT_MODEL_OPTIONS: Record<
@@ -106,6 +107,11 @@ export const DESKTOP_LOCAL_CHAT_MODEL_OPTIONS: Record<
         { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
         { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
         { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
+    ],
+    gemini: [
+        { value: 'auto-gemini-3', label: 'Auto Gemini 3' },
+        { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+        { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
     ],
 };
 
@@ -275,7 +281,7 @@ function hydrateMessage(message: unknown): ChatMessage {
 }
 
 function isDesktopLocalChatCli(value: unknown): value is DesktopLocalChatCli {
-    return value === 'claude' || value === 'codex';
+    return value === 'claude' || value === 'codex' || value === 'gemini';
 }
 
 function isDesktopLocalChatSessionStatus(value: unknown): value is DesktopLocalChatSessionStatus {
@@ -467,6 +473,9 @@ function hydratePreferences(preferences: unknown): DesktopLocalChatPreferences {
             codex: isValidDesktopLocalChatModel('codex', selectedModels.codex)
                 ? selectedModels.codex
                 : undefined,
+            gemini: isValidDesktopLocalChatModel('gemini', selectedModels.gemini)
+                ? selectedModels.gemini
+                : undefined,
         },
         codexReasoningEffort: normalizeDesktopLocalChatCodexReasoningEffort(
             candidate.codexReasoningEffort,
@@ -540,6 +549,120 @@ function isMissingFileError(error: unknown) {
 
 function isDesktopLocalChatSessionLocked(session: DesktopLocalConversationSessionState | null) {
     return session?.status === 'submitted' || session?.status === 'running';
+}
+
+const DESKTOP_LOCAL_CHAT_SUBMITTED_STALE_MS = 30_000;
+const DESKTOP_LOCAL_CHAT_RUNNING_WITHOUT_SESSION_STALE_MS = 60_000;
+const DESKTOP_LOCAL_CHAT_LOCKED_WITHOUT_RESPONSE_STALE_MS = 90_000;
+const DESKTOP_LOCAL_CHAT_LOCKED_HARD_STALE_MS = 10 * 60_000;
+
+function hasAssistantMessageForTurn(
+    messages: ChatMessage[],
+    activeTurnId: string | null,
+) {
+    return messages.some((message) => {
+        if (message.role !== 'assistant') {
+            return false;
+        }
+
+        if (!activeTurnId) {
+            return true;
+        }
+
+        return message.metadata?.turnId === activeTurnId;
+    });
+}
+
+function recoverDesktopLocalConversationSession(
+    session: DesktopLocalConversationSessionState,
+    messages: ChatMessage[],
+    now = new Date(),
+): {
+    session: DesktopLocalConversationSessionState;
+    recovered: boolean;
+} {
+    const ageMs = now.getTime() - session.updatedAt.getTime();
+    const hasAssistantResponse = hasAssistantMessageForTurn(messages, session.activeTurnId);
+    const staleSubmitted =
+        session.status === 'submitted'
+        && !session.sessionId
+        && ageMs > DESKTOP_LOCAL_CHAT_SUBMITTED_STALE_MS;
+    const staleRunningWithoutSession =
+        session.status === 'running'
+        && !session.sessionId
+        && ageMs > DESKTOP_LOCAL_CHAT_RUNNING_WITHOUT_SESSION_STALE_MS;
+    const staleLockedWithoutResponse =
+        (session.status === 'submitted' || session.status === 'running')
+        && !hasAssistantResponse
+        && ageMs > DESKTOP_LOCAL_CHAT_LOCKED_WITHOUT_RESPONSE_STALE_MS;
+    const staleLockedSession =
+        (session.status === 'submitted' || session.status === 'running')
+        && ageMs > DESKTOP_LOCAL_CHAT_LOCKED_HARD_STALE_MS;
+
+    if (
+        !staleSubmitted
+        && !staleRunningWithoutSession
+        && !staleLockedWithoutResponse
+        && !staleLockedSession
+    ) {
+        return {
+            session,
+            recovered: false,
+        };
+    }
+
+    return {
+        recovered: true,
+        session: {
+            ...session,
+            status: 'error',
+            lastError:
+                session.lastError
+                ?? 'The previous desktop-local chat turn did not finish starting.',
+            completedAt: session.completedAt ?? now,
+            updatedAt: now,
+        },
+    };
+}
+
+function recoverDesktopLocalChatStore(store: DesktopLocalChatStore): {
+    store: DesktopLocalChatStore;
+    recovered: boolean;
+} {
+    const now = new Date();
+    let recovered = false;
+    const conversations = store.conversations.map((conversation) => {
+        const recovery = recoverDesktopLocalConversationSession(
+            conversation.session,
+            store.messagesByConversationId[conversation.id] ?? [],
+            now,
+        );
+        if (!recovery.recovered) {
+            return conversation;
+        }
+
+        recovered = true;
+        return {
+            ...conversation,
+            session: recovery.session,
+            updatedAt: recovery.session.updatedAt,
+        };
+    });
+
+    if (!recovered) {
+        return {
+            store,
+            recovered: false,
+        };
+    }
+
+    return {
+        recovered: true,
+        store: {
+            ...store,
+            conversations: sortConversations(conversations),
+        },
+    };
 }
 
 function createDesktopLocalChatStoreTempPath() {
@@ -664,13 +787,14 @@ async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLoca
             return createEmptyChatStore();
         }
 
-        const { store, repairedContent } = parseDesktopLocalChatStoreContent(content);
-        if (repairedContent) {
+        const { store: parsedStore, repairedContent } = parseDesktopLocalChatStoreContent(content);
+        const { store, recovered } = recoverDesktopLocalChatStore(parsedStore);
+        if (repairedContent || recovered) {
             const tempPath = createDesktopLocalChatStoreTempPath();
             await bridge.writeFile({
                 sessionId,
                 path: tempPath,
-                content: repairedContent,
+                content: repairedContent ?? JSON.stringify(store, null, 2),
                 overwrite: true,
             });
             await bridge.renameFile({
@@ -939,7 +1063,7 @@ async function detectDesktopLocalChatCli(projectId: string): Promise<DesktopLoca
     const { output } = await bridge.runCommand({
         sessionId,
         command:
-            "if command -v claude >/dev/null 2>&1; then printf 'claude\n'; fi; if command -v codex >/dev/null 2>&1; then printf 'codex\n'; fi",
+            "if command -v claude >/dev/null 2>&1; then printf 'claude\n'; fi; if command -v codex >/dev/null 2>&1; then printf 'codex\n'; fi; if command -v gemini >/dev/null 2>&1; then printf 'gemini\n'; fi",
     });
 
     return output

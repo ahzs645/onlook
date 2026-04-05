@@ -71,9 +71,23 @@ function ClaudeLogo(props: ProviderLogoProps) {
     );
 }
 
+function GeminiLogo(props: ProviderLogoProps) {
+    return (
+        <svg {...props} viewBox="0 0 24 24" fill="none">
+            <path d="M12 1.5 14.65 9.35 12 12V1.5Z" fill="#4285F4" />
+            <path d="M14.65 9.35 22.5 12 12 12l2.65-2.65Z" fill="#9B72CB" />
+            <path d="M12 12 22.5 12l-7.85 2.65L12 12Z" fill="#D96570" />
+            <path d="M12 12 14.65 14.65 12 22.5 9.35 14.65 12 12Z" fill="#F2A60C" />
+            <path d="M1.5 12 9.35 9.35 12 12l-10.5 0Z" fill="#34A853" />
+            <path d="M9.35 9.35 12 1.5V12L9.35 9.35Z" fill="#5A95F5" />
+        </svg>
+    );
+}
+
 const PROVIDER_LOGOS: Record<DesktopLocalChatCli, (props: ProviderLogoProps) => JSX.Element> = {
     claude: ClaudeLogo,
     codex: CodexLogo,
+    gemini: GeminiLogo,
 };
 
 function providerLogoClassName(cli: DesktopLocalChatCli, className: string) {
@@ -92,6 +106,11 @@ export function DesktopLocalChatModelSelector({
     const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
     const [isEffortOpen, setIsEffortOpen] = useState(false);
+    const blurActiveElement = () => {
+        if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+        }
+    };
 
     const loadPickerState = useCallback(async () => {
         setIsLoading(true);
@@ -207,7 +226,16 @@ export function DesktopLocalChatModelSelector({
 
     return (
         <>
-            <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+            <DropdownMenu
+                modal={false}
+                open={isOpen}
+                onOpenChange={(open) => {
+                    if (open) {
+                        blurActiveElement();
+                    }
+                    setIsOpen(open);
+                }}
+            >
                 <DropdownMenuTrigger asChild>
                     <Button
                         variant="ghost"
@@ -217,6 +245,9 @@ export function DesktopLocalChatModelSelector({
                             'h-8 max-w-[180px] min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-foreground-onlook',
                             isDisabled && 'opacity-50 cursor-not-allowed',
                         )}
+                        onMouseDown={() => {
+                            blurActiveElement();
+                        }}
                     >
                         <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
                             {ActiveProviderLogo ? (
@@ -323,7 +354,16 @@ export function DesktopLocalChatModelSelector({
                 </DropdownMenuContent>
             </DropdownMenu>
             {selection?.cli === 'codex' ? (
-                <DropdownMenu open={isEffortOpen} onOpenChange={setIsEffortOpen}>
+                <DropdownMenu
+                    modal={false}
+                    open={isEffortOpen}
+                    onOpenChange={(open) => {
+                        if (open) {
+                            blurActiveElement();
+                        }
+                        setIsEffortOpen(open);
+                    }}
+                >
                     <DropdownMenuTrigger asChild>
                         <Button
                             variant="ghost"
@@ -334,6 +374,9 @@ export function DesktopLocalChatModelSelector({
                                 'h-8 max-w-[120px] min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-foreground-onlook',
                                 isEffortDisabled && 'opacity-50 cursor-not-allowed',
                             )}
+                            onMouseDown={() => {
+                                blurActiveElement();
+                            }}
                         >
                             <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
                                 <span className="min-w-0 flex-1 truncate text-xs font-medium">
