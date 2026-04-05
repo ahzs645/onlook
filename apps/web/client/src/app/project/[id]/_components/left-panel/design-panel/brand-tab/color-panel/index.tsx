@@ -14,13 +14,17 @@ const ColorPanel = observer(() => {
     const [isAddingNewGroup, setIsAddingNewGroup] = useState(false);
 
     const editorEngine = useEditorEngine();
+    const activeBranchId = editorEngine.branches.activeBranchId;
     const themeManager = editorEngine.theme;
 
     const { colorGroups, colorDefaults } = themeManager;
 
     useEffect(() => {
-        themeManager.scanConfig();
-    }, []);
+        if (!activeBranchId) {
+            return;
+        }
+        void themeManager.scanConfig();
+    }, [activeBranchId, themeManager]);
 
     const handleRename = async (groupName: string, newName: string) => {
         await themeManager.rename(groupName, newName);

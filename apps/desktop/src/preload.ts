@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('onlookDesktop', {
     saveProject: (folderPath: string) =>
         ipcRenderer.invoke('desktop:save-project', folderPath),
     getProject: (projectId: string) => ipcRenderer.invoke('desktop:get-project', projectId),
+    readChatStore: (projectId: string) =>
+        ipcRenderer.invoke('desktop:read-chat-store', projectId),
+    writeChatStore: (projectId: string, content: string) =>
+        ipcRenderer.invoke('desktop:write-chat-store', projectId, content),
     saveProjectPreview: (projectId: string, previewImageDataUrl: string) =>
         ipcRenderer.invoke('desktop:save-project-preview', projectId, previewImageDataUrl),
     launchProject: (folderPath: string) =>

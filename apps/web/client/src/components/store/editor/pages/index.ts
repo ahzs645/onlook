@@ -32,10 +32,14 @@ export class PagesManager {
             if (this._isScanning) {
                 return;
             }
+            const sandbox = this.editorEngine.branches.activeSandboxOrNull;
+            if (!sandbox) {
+                return;
+            }
             runInAction(() => {
                 this._isScanning = true;
             });
-            const realPages = await scanPagesFromSandbox(this.editorEngine.activeSandbox);
+            const realPages = await scanPagesFromSandbox(sandbox);
             this.setPages(realPages);
             return;
         } catch (error) {

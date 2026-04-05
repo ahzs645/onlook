@@ -674,10 +674,14 @@ export class ThemeManager {
         configPath: string | null;
         cssPath: string | null;
     }> {
+        const sandbox = this.editorEngine.branches.activeSandboxOrNull;
+        if (!sandbox) {
+            return { configPath: null, cssPath: null };
+        }
         const list: {
             path: string;
             type: "file" | "directory";
-        }[] = await this.editorEngine.activeSandbox.listAllFiles();
+        }[] = await sandbox.listAllFiles();
 
         if (!list.length) {
             return { configPath: null, cssPath: null };
@@ -691,14 +695,18 @@ export class ThemeManager {
 
     async scanTailwindConfig() {
         try {
+            const sandbox = this.editorEngine.branches.activeSandboxOrNull;
+            if (!sandbox) {
+                return null;
+            }
             const { configPath, cssPath } = await this.getConfigPath();
 
             if (!configPath || !cssPath) {
                 return null;
             }
 
-            const configFile = await this.editorEngine.activeSandbox.readFile(configPath);
-            const cssFile = await this.editorEngine.activeSandbox.readFile(cssPath);
+            const configFile = await sandbox.readFile(configPath);
+            const cssFile = await sandbox.readFile(cssPath);
             const configContent = configFile && typeof configFile === 'string' ? extractColorsFromTailwindConfig(configFile) : '';
             const cssContent = cssFile && typeof cssFile === 'string' ? extractTailwindCssVariables(cssFile) : '';
             return {

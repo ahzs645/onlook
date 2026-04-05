@@ -105,8 +105,20 @@ export class BranchManager {
         return this.activeBranchData.branch;
     }
 
+    get activeBranchId(): string | null {
+        return this.getResolvedBranchId();
+    }
+
+    get activeBranchOrNull(): Branch | null {
+        return this.activeBranchId ? this.branchMap.get(this.activeBranchId)?.branch ?? null : null;
+    }
+
     get activeSandbox(): SandboxManager {
         return this.activeBranchData.sandbox;
+    }
+
+    get activeSandboxOrNull(): SandboxManager | null {
+        return this.activeBranchId ? this.branchMap.get(this.activeBranchId)?.sandbox ?? null : null;
     }
 
     get activeHistory(): HistoryManager {

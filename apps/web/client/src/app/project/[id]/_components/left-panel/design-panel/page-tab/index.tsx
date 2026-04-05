@@ -14,6 +14,7 @@ import { PageModal } from './page-modal';
 
 export const PagesTab = observer(() => {
     const editorEngine = useEditorEngine();
+    const activeBranchId = editorEngine.branches.activeBranchId;
     const { ref, width, height } = useResizeObserver();
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -23,8 +24,11 @@ export const PagesTab = observer(() => {
 
     // TODO: use file system like code tab
     useEffect(() => {
-        editorEngine.pages.scanPages();
-    }, []);
+        if (!activeBranchId) {
+            return;
+        }
+        void editorEngine.pages.scanPages();
+    }, [activeBranchId, editorEngine.pages]);
 
     const filteredPages = useMemo(() => {
         if (!searchQuery.trim()) {

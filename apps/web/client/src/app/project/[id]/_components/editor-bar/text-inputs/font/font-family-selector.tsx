@@ -16,6 +16,7 @@ import { FontFamily } from './font-family';
 
 export const FontFamilySelector = observer(() => {
     const editorEngine = useEditorEngine();
+    const activeBranchId = editorEngine.branches.activeBranchId;
     const { handleFontFamilyChange, textState } = useTextControl();
     const { isOpen, onOpenChange } = useDropdownControl({
         id: 'font-family-dropdown',
@@ -23,11 +24,11 @@ export const FontFamilySelector = observer(() => {
 
     // TODO: use file system like code tab
     useEffect(() => {
-        if (!editorEngine.activeSandbox.session.provider) {
+        if (!activeBranchId) {
             return;
         }
         editorEngine.font.init();
-    }, [editorEngine.activeSandbox.session.provider]);
+    }, [activeBranchId, editorEngine.font]);
 
     const handleClose = () => {
         onOpenChange(false);

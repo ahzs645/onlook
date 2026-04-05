@@ -23,6 +23,7 @@ const PREVIEW_CAPTURE_TIMEOUT_MS = 15_000;
 const PREVIEW_CAPTURE_PROBE_TIMEOUT_MS = 1500;
 const NODE_FS_SANDBOX_PREFIX = 'nodefs:session:';
 const RECENT_PROJECTS_FILE_NAME = 'desktop-projects.json';
+const DESKTOP_CHAT_DIRECTORY_NAME = 'desktop-chat';
 const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'build', '.git', '.next', '.next-prod']);
 const IGNORED_FILES = new Set([
     '.DS_Store',
@@ -747,6 +748,17 @@ function getRecentProjectsStoragePath() {
     return path.join(app.getPath('userData'), RECENT_PROJECTS_FILE_NAME);
 }
 
+function getDesktopChatStorageDirectoryPath() {
+    return path.join(app.getPath('userData'), DESKTOP_CHAT_DIRECTORY_NAME);
+}
+
+function getDesktopChatStoragePath(projectId: string) {
+    return path.join(
+        getDesktopChatStorageDirectoryPath(),
+        `${encodeURIComponent(projectId)}.json`,
+    );
+}
+
 function isDesktopProjectRecord(value: unknown): value is DesktopRecentProjectRecord | Omit<DesktopRecentProjectRecord, 'id'> {
     if (!value || typeof value !== 'object') {
         return false;
@@ -815,6 +827,27 @@ async function writeRecentProjects(records: DesktopRecentProjectRecord[]) {
     const storagePath = getRecentProjectsStoragePath();
     await fs.mkdir(path.dirname(storagePath), { recursive: true });
     await fs.writeFile(storagePath, JSON.stringify(records, null, 2), 'utf8');
+}
+
+async function readDesktopChatStore(projectId: string): Promise<string | null> {
+    try {
+        return await fs.readFile(getDesktopChatStoragePath(projectId), 'utf8');
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return null;
+        }
+
+        console.warn('[desktop] Failed to read desktop chat store:', error);
+        throw error;
+    }
+}
+
+async function writeDesktopChatStore(projectId: string, content: string) {
+    const storagePath = getDesktopChatStoragePath(projectId);
+    await fs.mkdir(path.dirname(storagePath), { recursive: true });
+    const tempPath = `${storagePath}.${randomUUID()}.tmp`;
+    await fs.writeFile(tempPath, content, 'utf8');
+    await fs.rename(tempPath, storagePath);
 }
 
 async function capturePreviewImageDataUrl(previewUrl: string): Promise<string | null> {
@@ -1014,6 +1047,7 @@ async function listRecentProjects(): Promise<DesktopRecentProject[]> {
                 .catch(() => false);
             const runtimeId = runtimeIdByFolderPath.get(record.folderPath) ?? null;
             const runtime = runtimeId ? (runtimesById.get(runtimeId) ?? null) : null;
+            const hasActiveSession = hasActiveRuntimeSession(runtime);
 
             if (!record.previewImageDataUrl) {
                 void maybeCaptureRecentProjectPreview(
@@ -1025,7 +1059,7 @@ async function listRecentProjects(): Promise<DesktopRecentProject[]> {
             return {
                 ...record,
                 exists,
-                sessionId: runtime?.id ?? null,
+                sessionId: hasActiveSession ? runtime?.id ?? null : null,
                 status: runtime?.status ?? null,
             };
         }),
@@ -1467,6 +1501,22 @@ function getRuntimeBySessionId(sessionId: string) {
     return runtimesById.get(sessionId) ?? null;
 }
 
+function hasActiveRuntimeSession(runtime: DesktopProjectRuntime | null) {
+    return runtime?.status === 'starting' || runtime?.status === 'running';
+}
+
+async function stopOtherRuntimes(exceptRuntimeId: string) {
+    await Promise.allSettled(
+        Array.from(runtimesById.values()).map(async (runtime) => {
+            if (runtime.id === exceptRuntimeId || runtime.status === 'stopped') {
+                return;
+            }
+
+            await runtime.stop();
+        }),
+    );
+}
+
 function getRuntimeByFolderPath(folderPath: string) {
     const runtimeId = runtimeIdByFolderPath.get(folderPath);
     if (!runtimeId) {
@@ -1518,6 +1568,7 @@ async function maybeAutoLaunchProject() {
         }
 
         const runtime = getOrCreateRuntime(folderPath, summary);
+        await stopOtherRuntimes(runtime.id);
         await runtime.start();
         const record = await saveRecentProject(runtime.toSession());
         await mainWindow.loadURL(getDesktopProjectUrl(runtime.id, record.id));
@@ -1550,6 +1601,7 @@ async function maybeResumeRecentProject() {
             }
 
             const runtime = getOrCreateRuntime(record.folderPath, summary);
+            await stopOtherRuntimes(runtime.id);
             await runtime.start();
             const savedRecord = await saveRecentProject(runtime.toSession(), record.id);
             await mainWindow.loadURL(getDesktopProjectUrl(runtime.id, savedRecord.id));
@@ -1601,6 +1653,29 @@ ipcMain.handle('desktop:get-project', async (_event, projectId: string) => {
     return projects.find((entry) => entry.id === projectId) ?? null;
 });
 
+ipcMain.handle('desktop:read-chat-store', async (_event, projectId: string) => {
+    if (!projectId) {
+        throw new Error('Project id is required');
+    }
+
+    return readDesktopChatStore(projectId);
+});
+
+ipcMain.handle(
+    'desktop:write-chat-store',
+    async (_event, projectId: string, content: string) => {
+        if (!projectId) {
+            throw new Error('Project id is required');
+        }
+
+        if (typeof content !== 'string') {
+            throw new Error('Chat store content must be a string');
+        }
+
+        await writeDesktopChatStore(projectId, content);
+    },
+);
+
 ipcMain.handle(
     'desktop:save-project-preview',
     async (_event, projectId: string, previewImageDataUrl: string) => {
@@ -1629,11 +1704,12 @@ ipcMain.handle('desktop:launch-project', async (_event, folderPath: string) => {
         throw new Error('Folder path is required');
     }
 
-    const existingRuntime = getRuntimeByFolderPath(folderPath);
-    if (existingRuntime) {
-        await existingRuntime.start();
-        await saveRecentProject(existingRuntime.toSession());
-        return existingRuntime.toSession();
+    let runtime = getRuntimeByFolderPath(folderPath);
+    if (runtime) {
+        await stopOtherRuntimes(runtime.id);
+        await runtime.start();
+        await saveRecentProject(runtime.toSession());
+        return runtime.toSession();
     }
 
     const summary = await inspectProject(folderPath);
@@ -1641,7 +1717,8 @@ ipcMain.handle('desktop:launch-project', async (_event, folderPath: string) => {
         throw new Error(summary.error ?? 'Project is not valid');
     }
 
-    const runtime = getOrCreateRuntime(folderPath, summary);
+    runtime = getOrCreateRuntime(folderPath, summary);
+    await stopOtherRuntimes(runtime.id);
     await runtime.start();
     await saveRecentProject(runtime.toSession());
     return runtime.toSession();
@@ -1657,11 +1734,12 @@ ipcMain.handle('desktop:launch-project-by-id', async (_event, projectId: string)
         throw new Error('Desktop project not found');
     }
 
-    const existingRuntime = getRuntimeByFolderPath(record.folderPath);
-    if (existingRuntime) {
-        await existingRuntime.start();
-        await saveRecentProject(existingRuntime.toSession(), record.id);
-        return existingRuntime.toSession();
+    let runtime = getRuntimeByFolderPath(record.folderPath);
+    if (runtime) {
+        await stopOtherRuntimes(runtime.id);
+        await runtime.start();
+        await saveRecentProject(runtime.toSession(), record.id);
+        return runtime.toSession();
     }
 
     const summary = await inspectProject(record.folderPath);
@@ -1669,14 +1747,19 @@ ipcMain.handle('desktop:launch-project-by-id', async (_event, projectId: string)
         throw new Error(summary.error ?? 'Project is not valid');
     }
 
-    const runtime = getOrCreateRuntime(record.folderPath, summary);
+    runtime = getOrCreateRuntime(record.folderPath, summary);
+    await stopOtherRuntimes(runtime.id);
     await runtime.start();
     await saveRecentProject(runtime.toSession(), record.id);
     return runtime.toSession();
 });
 
 ipcMain.handle('desktop:get-project-session', async (_event, sessionId: string) => {
-    return getRuntimeBySessionId(sessionId)?.toSession() ?? null;
+    const runtime = getRuntimeBySessionId(sessionId);
+    if (!hasActiveRuntimeSession(runtime)) {
+        return null;
+    }
+    return runtime.toSession();
 });
 
 ipcMain.handle('desktop:list-projects', async () => {
@@ -1823,6 +1906,7 @@ ipcMain.handle('desktop:provider:task-run', async (_event, input) => {
     if (!runtime) {
         throw new Error(`Task not found: ${input.taskId}`);
     }
+    await stopOtherRuntimes(runtime.id);
     await runtime.start();
 });
 
@@ -1896,6 +1980,7 @@ ipcMain.handle('desktop:provider:reload', async (_event, input) => {
 ipcMain.handle('desktop:provider:reconnect', async (_event, input) => {
     const runtime = getRuntimeBySandboxId(`${NODE_FS_SANDBOX_PREFIX}${input.sessionId}`);
     if (runtime.status !== 'running') {
+        await stopOtherRuntimes(runtime.id);
         await runtime.start();
     }
 });

@@ -18,6 +18,7 @@ const FontPanel = observer(() => {
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
     const editorEngine = useEditorEngine();
+    const activeBranchId = editorEngine.branches.activeBranchId;
     const fontManager = editorEngine.font;
 
     const handleClose = () => {
@@ -30,8 +31,11 @@ const FontPanel = observer(() => {
 
     // TODO: use file system like code tab
     useEffect(() => {
+        if (!activeBranchId) {
+            return;
+        }
         editorEngine.font.init();
-    }, [editorEngine.activeSandbox.session.provider]);
+    }, [activeBranchId, editorEngine.font]);
 
     const handleFontUpload = async (fonts: FontFile[]) => {
         try {

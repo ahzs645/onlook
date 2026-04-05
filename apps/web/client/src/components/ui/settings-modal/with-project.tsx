@@ -49,6 +49,7 @@ export const SettingsModalWithProjects = observer(() => {
     const editorEngine = useEditorEngine();
     const stateManager = useStateManager();
     const pagesManager = editorEngine.pages;
+    const activeBranchId = editorEngine.branches.activeBranchId;
     const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
 
     const flattenPages = useMemo(() => {
@@ -117,11 +118,11 @@ export const SettingsModalWithProjects = observer(() => {
 
     // TODO: use file system like code tab
     useEffect(() => {
-        if (!stateManager.isSettingsModalOpen) {
+        if (!stateManager.isSettingsModalOpen || !activeBranchId) {
             return;
         }
-        editorEngine.pages.scanPages();
-    }, [editorEngine.pages, stateManager.isSettingsModalOpen]);
+        void editorEngine.pages.scanPages();
+    }, [activeBranchId, editorEngine.pages, stateManager.isSettingsModalOpen]);
 
     useEffect(() => {
         if (!isDesktopLocal) {

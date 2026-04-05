@@ -34,9 +34,9 @@ export class FontManager {
     }
 
     init() {
-        this.loadInitialFonts();
-        this.getCurrentDefaultFont();
-        this.syncFontsWithConfigs();
+        void this.loadInitialFonts();
+        void this.getCurrentDefaultFont();
+        void this.syncFontsWithConfigs();
     }
 
     private async loadInitialFonts(): Promise<void> {
@@ -109,16 +109,8 @@ export class FontManager {
             }
             const success = await addFontToConfig(font, fontConfigPath, this.editorEngine);
             if (success) {
-                // Update the fonts array
-                runInAction(() => {
-                    this._fonts.push(font);
-                });
-
-                // Update font search manager with current fonts
-                this.fontSearchManager.updateFontsList(this._fonts);
-
-                // Load the new font in the search manager
                 await this.fontSearchManager.loadFontFromBatch([font]);
+                await this.syncFontsWithConfigs();
 
                 return true;
             }
@@ -263,6 +255,7 @@ export class FontManager {
                     fontConfigPath,
                     code,
                 );
+                await this.syncFontsWithConfigs();
             }
 
             return result.success;

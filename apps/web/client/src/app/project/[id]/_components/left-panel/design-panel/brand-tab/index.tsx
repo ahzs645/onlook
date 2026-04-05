@@ -20,11 +20,15 @@ const ColorSquare = ({ color }: ColorSquareProps) => (
 
 export const BrandTab = observer(() => {
     const editorEngine = useEditorEngine();
+    const activeBranchId = editorEngine.branches.activeBranchId;
     const [brandColors, setBrandColors] = useState<string[]>([]);
 
     // Get project brand colors
     useEffect(() => {
         const loadBrandColors = async () => {
+            if (!activeBranchId) {
+                return;
+            }
             await editorEngine.theme.scanConfig();
             const { colorGroups, colorDefaults } = editorEngine.theme;
 
@@ -55,7 +59,7 @@ export const BrandTab = observer(() => {
         };
 
         loadBrandColors();
-    }, [editorEngine.theme]);
+    }, [activeBranchId, editorEngine.theme]);
 
     // If color panel is visible, show it instead of the main content
     if (editorEngine.state.brandTab === BrandTabValue.COLORS) {

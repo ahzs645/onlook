@@ -88,6 +88,8 @@ declare global {
         inspectProject: (folderPath: string) => Promise<DesktopProjectSummary>;
         saveProject: (folderPath: string) => Promise<DesktopRecentProject>;
         getProject: (projectId: string) => Promise<DesktopRecentProject | null>;
+        readChatStore: (projectId: string) => Promise<string | null>;
+        writeChatStore: (projectId: string, content: string) => Promise<void>;
         saveProjectPreview: (
             projectId: string,
             previewImageDataUrl: string,

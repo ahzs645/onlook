@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { isDesktopLocalProjectId, parseDesktopLocalProjectId } from './desktop-local';
 
-const DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
+const LEGACY_DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
 
 export type DesktopLocalChatCli = 'claude' | 'codex' | 'gemini';
 export type DesktopLocalChatCodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
@@ -665,10 +665,6 @@ function recoverDesktopLocalChatStore(store: DesktopLocalChatStore): {
     };
 }
 
-function createDesktopLocalChatStoreTempPath() {
-    return `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.${uuidv4()}.tmp`;
-}
-
 function findRootJsonDocumentEnd(content: string): number | null {
     let depth = 0;
     let inString = false;
@@ -762,8 +758,17 @@ function parseDesktopLocalChatStoreContent(content: string) {
     }
 }
 
-async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLocalChatStore> {
-    const { bridge, sessionId } = await resolveDesktopLocalProjectSession(projectId);
+async function readLegacyDesktopLocalChatStore(
+    projectId: string,
+): Promise<DesktopLocalChatStore | null> {
+    let bridge: Awaited<ReturnType<typeof resolveDesktopLocalProjectSession>>['bridge'];
+    let sessionId: string;
+
+    try {
+        ({ bridge, sessionId } = await resolveDesktopLocalProjectSession(projectId));
+    } catch {
+        return null;
+    }
 
     try {
         const directoryListing = await bridge.listFiles({
@@ -774,66 +779,64 @@ async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLoca
             (entry) => entry.type === 'file' && entry.name === 'desktop-chat.json',
         );
         if (!hasStoreFile) {
-            return createEmptyChatStore();
+            return null;
         }
 
         const result = await bridge.readFile({
             sessionId,
-            path: DESKTOP_LOCAL_CHAT_STORE_PATH,
+            path: LEGACY_DESKTOP_LOCAL_CHAT_STORE_PATH,
         });
-
         const content = result.file.content;
         if (typeof content !== 'string' || content.trim().length === 0) {
-            return createEmptyChatStore();
+            return null;
         }
 
-        const { store: parsedStore, repairedContent } = parseDesktopLocalChatStoreContent(content);
-        const { store, recovered } = recoverDesktopLocalChatStore(parsedStore);
-        if (repairedContent || recovered) {
-            const tempPath = createDesktopLocalChatStoreTempPath();
-            await bridge.writeFile({
-                sessionId,
-                path: tempPath,
-                content: repairedContent ?? JSON.stringify(store, null, 2),
-                overwrite: true,
-            });
-            await bridge.renameFile({
-                sessionId,
-                oldPath: tempPath,
-                newPath: DESKTOP_LOCAL_CHAT_STORE_PATH,
-            });
-        }
-
+        const { store: parsedStore } = parseDesktopLocalChatStoreContent(content);
+        const { store } = recoverDesktopLocalChatStore(parsedStore);
         return store;
     } catch (error) {
         if (isMissingFileError(error)) {
-            return createEmptyChatStore();
+            return null;
         }
         throw error;
     }
 }
 
+async function readDesktopLocalChatStore(projectId: string): Promise<DesktopLocalChatStore> {
+    const { desktopBridge, desktopProjectId } = ensureDesktopLocalProject(projectId);
+    const persistedContent = await desktopBridge.readChatStore(desktopProjectId);
+    if (typeof persistedContent === 'string' && persistedContent.trim().length > 0) {
+        const { store: parsedStore, repairedContent } = parseDesktopLocalChatStoreContent(
+            persistedContent,
+        );
+        const { store, recovered } = recoverDesktopLocalChatStore(parsedStore);
+        if (repairedContent || recovered) {
+            await desktopBridge.writeChatStore(
+                desktopProjectId,
+                repairedContent ?? JSON.stringify(store, null, 2),
+            );
+        }
+        return store;
+    }
+
+    const legacyStore = await readLegacyDesktopLocalChatStore(projectId);
+    if (!legacyStore) {
+        return createEmptyChatStore();
+    }
+
+    await desktopBridge.writeChatStore(
+        desktopProjectId,
+        JSON.stringify(legacyStore, null, 2),
+    );
+    return legacyStore;
+}
+
 async function writeDesktopLocalChatStore(projectId: string, store: DesktopLocalChatStore) {
-    const { bridge, sessionId } = await resolveDesktopLocalProjectSession(projectId);
-
-    await bridge.createDirectory({
-        sessionId,
-        path: ONLOOK_CACHE_DIRECTORY,
-    });
-
-    const serializedStore = JSON.stringify(store, null, 2);
-    const tempPath = createDesktopLocalChatStoreTempPath();
-    await bridge.writeFile({
-        sessionId,
-        path: tempPath,
-        content: serializedStore,
-        overwrite: true,
-    });
-    await bridge.renameFile({
-        sessionId,
-        oldPath: tempPath,
-        newPath: DESKTOP_LOCAL_CHAT_STORE_PATH,
-    });
+    const { desktopBridge, desktopProjectId } = ensureDesktopLocalProject(projectId);
+    await desktopBridge.writeChatStore(
+        desktopProjectId,
+        JSON.stringify(store, null, 2),
+    );
 }
 
 function sortConversations(conversations: DesktopLocalStoredConversation[]) {
