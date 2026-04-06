@@ -487,6 +487,10 @@ export class E2BTerminal extends ProviderTerminal {
         return this.pid?.toString() ?? 'pty';
     }
 
+    get sessionType() {
+        return 'pty' as const;
+    }
+
     get name(): string {
         return 'terminal';
     }

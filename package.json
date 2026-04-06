@@ -23,6 +23,8 @@
         "dev": "bun --filter @onlook/web dev",
         "dev:desktop": "bun --filter @onlook/desktop dev",
         "build:desktop": "bun --filter @onlook/desktop build",
+        "package:desktop": "bun --filter @onlook/desktop package:dir",
+        "smoke:desktop": "bun --filter @onlook/desktop package:smoke",
         "start:desktop": "bun --filter @onlook/desktop start",
         "test": "bun --filter '*' test",
         "docs": "bun --filter @onlook/docs dev",

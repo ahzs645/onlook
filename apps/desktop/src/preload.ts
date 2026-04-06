@@ -1,16 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-
-const getStreamChannel = (kind: 'terminal' | 'task' | 'command', id: string) => {
-    return `desktop:provider:${kind}:${id}:output`;
-};
-
-const getWatchChannel = (watcherId: string) => {
-    return `desktop:provider:watch:${watcherId}:event`;
-};
-
-const getProjectsUpdatedChannel = () => {
-    return 'desktop:projects:updated';
-};
+import { desktopIpcChannels, getProviderStreamChannel, getProviderWatchChannel } from './ipc/channels';
 
 function subscribe<T>(channel: string, callback: (payload: T) => void) {
     const listener = (_event: Electron.IpcRendererEvent, payload: T) => {
@@ -23,93 +12,109 @@ function subscribe<T>(channel: string, callback: (payload: T) => void) {
     };
 }
 
+ipcRenderer.on(desktopIpcChannels.events.prepareToQuit, (_event, payload) => {
+    window.dispatchEvent(
+        new CustomEvent('onlook-desktop:prepare-to-quit', {
+            detail: payload,
+        }),
+    );
+});
+
 contextBridge.exposeInMainWorld('onlookDesktop', {
     isDesktop: true,
     electronVersion: process.versions.electron,
-    pickDirectory: () => ipcRenderer.invoke('desktop:pick-directory') as Promise<string | null>,
+    pickDirectory: () => ipcRenderer.invoke(desktopIpcChannels.pickDirectory) as Promise<string | null>,
     inspectProject: (folderPath: string) =>
-        ipcRenderer.invoke('desktop:inspect-project', folderPath),
+        ipcRenderer.invoke(desktopIpcChannels.inspectProject, folderPath),
     saveProject: (folderPath: string) =>
-        ipcRenderer.invoke('desktop:save-project', folderPath),
-    getProject: (projectId: string) => ipcRenderer.invoke('desktop:get-project', projectId),
+        ipcRenderer.invoke(desktopIpcChannels.saveProject, folderPath),
+    getProject: (projectId: string) => ipcRenderer.invoke(desktopIpcChannels.getProject, projectId),
     readChatStore: (projectId: string) =>
-        ipcRenderer.invoke('desktop:read-chat-store', projectId),
+        ipcRenderer.invoke(desktopIpcChannels.readChatStore, projectId),
     writeChatStore: (projectId: string, content: string) =>
-        ipcRenderer.invoke('desktop:write-chat-store', projectId, content),
+        ipcRenderer.invoke(desktopIpcChannels.writeChatStore, projectId, content),
     saveProjectPreview: (projectId: string, previewImageDataUrl: string) =>
-        ipcRenderer.invoke('desktop:save-project-preview', projectId, previewImageDataUrl),
+        ipcRenderer.invoke(desktopIpcChannels.saveProjectPreview, projectId, previewImageDataUrl),
     launchProject: (folderPath: string) =>
-        ipcRenderer.invoke('desktop:launch-project', folderPath),
+        ipcRenderer.invoke(desktopIpcChannels.launchProject, folderPath),
     launchProjectById: (projectId: string) =>
-        ipcRenderer.invoke('desktop:launch-project-by-id', projectId),
+        ipcRenderer.invoke(desktopIpcChannels.launchProjectById, projectId),
     getProjectSession: (sessionId: string) =>
-        ipcRenderer.invoke('desktop:get-project-session', sessionId),
-    listProjects: () => ipcRenderer.invoke('desktop:list-projects'),
+        ipcRenderer.invoke(desktopIpcChannels.getProjectSession, sessionId),
+    listProjects: () => ipcRenderer.invoke(desktopIpcChannels.listProjects),
+    getSettings: () => ipcRenderer.invoke(desktopIpcChannels.getSettings),
+    updateSettings: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.updateSettings, input),
+    updateProjectRuntime: (input: unknown) =>
+        ipcRenderer.invoke(desktopIpcChannels.updateProjectRuntime, input),
     onProjectsUpdated: (callback: (payload: { projectId: string }) => void) =>
-        subscribe(getProjectsUpdatedChannel(), callback),
+        subscribe(desktopIpcChannels.events.projectsUpdated, callback),
+    onPrepareToQuit: (callback: (payload: { reason: 'app-quit' }) => void) =>
+        subscribe(desktopIpcChannels.events.prepareToQuit, callback),
     removeProject: (projectId: string) =>
-        ipcRenderer.invoke('desktop:remove-project', projectId),
-    openPath: (targetPath: string) => ipcRenderer.invoke('desktop:open-path', targetPath),
+        ipcRenderer.invoke(desktopIpcChannels.removeProject, projectId),
+    openPath: (targetPath: string) => ipcRenderer.invoke(desktopIpcChannels.openPath, targetPath),
     openExternal: (targetUrl: string) =>
-        ipcRenderer.invoke('desktop:open-external', targetUrl),
+        ipcRenderer.invoke(desktopIpcChannels.openExternal, targetUrl),
     provider: {
-        writeFile: (input: unknown) => ipcRenderer.invoke('desktop:provider:write-file', input),
-        renameFile: (input: unknown) => ipcRenderer.invoke('desktop:provider:rename-file', input),
-        statFile: (input: unknown) => ipcRenderer.invoke('desktop:provider:stat-file', input),
+        writeFile: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.writeFile, input),
+        renameFile: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.renameFile, input),
+        statFile: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.statFile, input),
         deleteFiles: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:delete-files', input),
-        listFiles: (input: unknown) => ipcRenderer.invoke('desktop:provider:list-files', input),
-        readFile: (input: unknown) => ipcRenderer.invoke('desktop:provider:read-file', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.deleteFiles, input),
+        listFiles: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.listFiles, input),
+        readFile: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.readFile, input),
         downloadFiles: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:download-files', input),
-        copyFiles: (input: unknown) => ipcRenderer.invoke('desktop:provider:copy-files', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.downloadFiles, input),
+        copyFiles: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.copyFiles, input),
         createDirectory: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:create-directory', input),
-        watchFiles: (input: unknown) => ipcRenderer.invoke('desktop:provider:watch-files', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.createDirectory, input),
+        watchFiles: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.watchFiles, input),
         unwatchFiles: (watcherId: string) =>
-            ipcRenderer.invoke('desktop:provider:unwatch-files', watcherId),
+            ipcRenderer.invoke(desktopIpcChannels.provider.unwatchFiles, watcherId),
         onWatchEvent: (watcherId: string, callback: (payload: unknown) => void) =>
-            subscribe(getWatchChannel(watcherId), callback),
+            subscribe(getProviderWatchChannel(watcherId), callback),
         createTerminal: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:create-terminal', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.createTerminal, input),
         terminalOpen: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:terminal-open', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.terminalOpen, input),
         terminalWrite: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:terminal-write', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.terminalWrite, input),
         terminalRun: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:terminal-run', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.terminalRun, input),
+        terminalResize: (input: unknown) =>
+            ipcRenderer.invoke(desktopIpcChannels.provider.terminalResize, input),
         terminalKill: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:terminal-kill', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.terminalKill, input),
         onTerminalOutput: (terminalId: string, callback: (payload: string) => void) =>
-            subscribe(getStreamChannel('terminal', terminalId), callback),
-        getTask: (input: unknown) => ipcRenderer.invoke('desktop:provider:get-task', input),
-        taskOpen: (input: unknown) => ipcRenderer.invoke('desktop:provider:task-open', input),
-        taskRun: (input: unknown) => ipcRenderer.invoke('desktop:provider:task-run', input),
+            subscribe(getProviderStreamChannel('terminal', terminalId), callback),
+        getTask: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.getTask, input),
+        taskOpen: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.taskOpen, input),
+        taskRun: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.taskRun, input),
         taskRestart: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:task-restart', input),
-        taskStop: (input: unknown) => ipcRenderer.invoke('desktop:provider:task-stop', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.taskRestart, input),
+        taskStop: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.taskStop, input),
         onTaskOutput: (taskId: string, callback: (payload: string) => void) =>
-            subscribe(getStreamChannel('task', taskId), callback),
+            subscribe(getProviderStreamChannel('task', taskId), callback),
         runCommand: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:run-command', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.runCommand, input),
         runBackgroundCommand: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:run-background-command', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.runBackgroundCommand, input),
         backgroundCommandOpen: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:background-command-open', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.backgroundCommandOpen, input),
         backgroundCommandRestart: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:background-command-restart', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.backgroundCommandRestart, input),
         backgroundCommandKill: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:background-command-kill', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.backgroundCommandKill, input),
         onBackgroundCommandOutput: (commandId: string, callback: (payload: string) => void) =>
-            subscribe(getStreamChannel('command', commandId), callback),
-        gitStatus: (input: unknown) => ipcRenderer.invoke('desktop:provider:git-status', input),
-        reload: (input: unknown) => ipcRenderer.invoke('desktop:provider:reload', input),
-        reconnect: (input: unknown) => ipcRenderer.invoke('desktop:provider:reconnect', input),
-        ping: (input: unknown) => ipcRenderer.invoke('desktop:provider:ping', input),
+            subscribe(getProviderStreamChannel('command', commandId), callback),
+        gitStatus: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.gitStatus, input),
+        reload: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.reload, input),
+        reconnect: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.reconnect, input),
+        ping: (input: unknown) => ipcRenderer.invoke(desktopIpcChannels.provider.ping, input),
         pauseProject: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:pause-project', input),
+            ipcRenderer.invoke(desktopIpcChannels.provider.pauseProject, input),
         stopProject: (input: unknown) =>
-            ipcRenderer.invoke('desktop:provider:stop-project', input),
-        listProjects: () => ipcRenderer.invoke('desktop:provider:list-projects'),
+            ipcRenderer.invoke(desktopIpcChannels.provider.stopProject, input),
+        listProjects: () => ipcRenderer.invoke(desktopIpcChannels.provider.listProjects),
     },
 });

@@ -8,6 +8,7 @@ import {
 } from '@onlook/models';
 import { v4 as uuidv4 } from 'uuid';
 
+import type { DesktopAiSettings } from './desktop-local';
 import { isDesktopLocalProjectId, parseDesktopLocalProjectId } from './desktop-local';
 
 const LEGACY_DESKTOP_LOCAL_CHAT_STORE_PATH = `${ONLOOK_CACHE_DIRECTORY}/desktop-chat.json`;
@@ -541,6 +542,31 @@ export function getDesktopLocalChatCodexReasoningEffortLabel(
     return DESKTOP_LOCAL_CHAT_CODEX_REASONING_EFFORT_OPTIONS.find(
         (option) => option.value === reasoningEffort,
     )?.label ?? reasoningEffort;
+}
+
+async function readDesktopGlobalAiSettings(): Promise<DesktopAiSettings | null> {
+    try {
+        return (await window.onlookDesktop?.getSettings?.())?.ai ?? null;
+    } catch (error) {
+        console.error('Failed to load desktop AI defaults:', error);
+        return null;
+    }
+}
+
+export function resolveDesktopLocalChatGlobalSelection(
+    availableClis: DesktopLocalChatCli[],
+    settings: DesktopAiSettings | null,
+    codexReasoningEffort: DesktopLocalChatCodexReasoningEffort | null,
+): DesktopLocalChatModelSelection | null {
+    if (!settings?.autoApplyToNewChats || !availableClis.includes(settings.providerSource)) {
+        return null;
+    }
+
+    return normalizeDesktopLocalChatSelection(
+        settings.providerSource,
+        settings.model,
+        settings.providerSource === 'codex' ? codexReasoningEffort : null,
+    );
 }
 
 function isMissingFileError(error: unknown) {
@@ -1109,9 +1135,10 @@ export async function getDesktopLocalChatSelection(
         return pickerState.selection;
     }
 
-    const [store, availableClis] = await Promise.all([
+    const [store, availableClis, globalAiSettings] = await Promise.all([
         readDesktopLocalChatStore(projectId),
         listAvailableDesktopLocalChatClis(projectId),
+        readDesktopGlobalAiSettings(),
     ]);
 
     if (availableClis.length === 0) {
@@ -1123,19 +1150,24 @@ export async function getDesktopLocalChatSelection(
         return null;
     }
 
-    const preferredCli = store.preferences.selectedCli;
-    const cli = preferredCli && availableClis.includes(preferredCli)
-        ? preferredCli
-        : fallbackCli;
-    const storedModel = store.preferences.selectedModels[cli];
-    const model = isValidDesktopLocalChatModel(cli, storedModel)
-        ? storedModel
-        : getDefaultDesktopLocalChatModel(cli);
-
-    return normalizeDesktopLocalChatSelection(
-        cli,
-        model,
-        cli === 'codex' ? store.preferences.codexReasoningEffort : null,
+    return resolveDesktopLocalChatGlobalSelection(
+        availableClis,
+        globalAiSettings,
+        store.preferences.codexReasoningEffort,
+    ) ?? normalizeDesktopLocalChatSelection(
+        store.preferences.selectedCli && availableClis.includes(store.preferences.selectedCli)
+            ? store.preferences.selectedCli
+            : fallbackCli,
+        store.preferences.selectedCli && availableClis.includes(store.preferences.selectedCli)
+            ? store.preferences.selectedModels[store.preferences.selectedCli] ?? null
+            : store.preferences.selectedModels[fallbackCli] ?? null,
+        (
+            store.preferences.selectedCli && availableClis.includes(store.preferences.selectedCli)
+                ? store.preferences.selectedCli
+                : fallbackCli
+        ) === 'codex'
+            ? store.preferences.codexReasoningEffort
+            : null,
     );
 }
 
@@ -1241,6 +1273,7 @@ function resolveDesktopLocalChatSelectionFromConversation(
     store: DesktopLocalChatStore,
     conversation: DesktopLocalStoredConversation | null,
     availableClis: DesktopLocalChatCli[],
+    globalAiSettings: DesktopAiSettings | null,
 ): DesktopLocalChatModelSelection | null {
     if (
         conversation?.session.providerName
@@ -1296,14 +1329,24 @@ function resolveDesktopLocalChatSelectionFromConversation(
         return null;
     }
 
-    const preferredCli = store.preferences.selectedCli;
-    const cli = preferredCli && availableClis.includes(preferredCli)
-        ? preferredCli
-        : fallbackCli;
-    return normalizeDesktopLocalChatSelection(
-        cli,
-        store.preferences.selectedModels[cli],
-        cli === 'codex' ? store.preferences.codexReasoningEffort : null,
+    return resolveDesktopLocalChatGlobalSelection(
+        availableClis,
+        globalAiSettings,
+        store.preferences.codexReasoningEffort,
+    ) ?? normalizeDesktopLocalChatSelection(
+        store.preferences.selectedCli && availableClis.includes(store.preferences.selectedCli)
+            ? store.preferences.selectedCli
+            : fallbackCli,
+        store.preferences.selectedCli && availableClis.includes(store.preferences.selectedCli)
+            ? store.preferences.selectedModels[store.preferences.selectedCli] ?? null
+            : store.preferences.selectedModels[fallbackCli] ?? null,
+        (
+            store.preferences.selectedCli && availableClis.includes(store.preferences.selectedCli)
+                ? store.preferences.selectedCli
+                : fallbackCli
+        ) === 'codex'
+            ? store.preferences.codexReasoningEffort
+            : null,
     );
 }
 
@@ -1311,9 +1354,10 @@ export async function getDesktopLocalChatPickerState(
     projectId: string,
     conversationId: string,
 ): Promise<DesktopLocalChatPickerState> {
-    const [store, availableClis] = await Promise.all([
+    const [store, availableClis, globalAiSettings] = await Promise.all([
         readDesktopLocalChatStore(projectId),
         listAvailableDesktopLocalChatClis(projectId),
+        readDesktopGlobalAiSettings(),
     ]);
     const conversation = store.conversations.find(
         (entry) => entry.id === conversationId,
@@ -1329,6 +1373,7 @@ export async function getDesktopLocalChatPickerState(
             store,
             conversation,
             availableClis,
+            globalAiSettings,
         ),
         lockedProvider,
         session,

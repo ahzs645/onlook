@@ -1,12 +1,11 @@
-import { FuzzyEditFileTool, SearchReplaceEditTool, SearchReplaceMultiEditFileTool, TerminalCommandTool, TypecheckTool, WebSearchTool, WriteFileTool } from '@onlook/ai';
+import { WebSearchTool } from '@onlook/ai';
 import type { WebSearchResult } from '@onlook/models';
 import type { ToolUIPart } from 'ai';
 import { observer } from 'mobx-react-lite';
-import stripAnsi from 'strip-ansi';
 import { type z } from 'zod';
-import { BashCodeDisplay } from '../../code-display/bash-code-display';
-import { CollapsibleCodeBlock } from '../../code-display/collapsible-code-block';
 import { SearchSourcesDisplay } from '../../code-display/search-sources-display';
+import { ToolArtifactCard } from './tool-artifact-card';
+import { resolveToolArtifact } from './tool-artifacts';
 import { ToolCallSimple } from './tool-call-simple';
 
 const ToolCallDisplayComponent = ({
@@ -20,7 +19,7 @@ const ToolCallDisplayComponent = ({
     isStream: boolean,
     applied: boolean
 }) => {
-    const toolName = toolPart.type.split('-')[1];
+    const toolName = toolPart.type.split('-')[1] ?? '';
 
     if (isStream || (toolPart.state !== 'output-available' && toolPart.state !== 'input-available')) {
         return (
@@ -32,24 +31,18 @@ const ToolCallDisplayComponent = ({
         );
     }
 
-    if (toolName === TerminalCommandTool.toolName) {
-        const args = toolPart.input as z.infer<typeof TerminalCommandTool.parameters> | null;
-        const result = toolPart.output as { output?: string; error?: string } | null;
-        if (!args?.command) {
-            return (
-                <ToolCallSimple
-                    toolPart={toolPart}
-                    key={toolPart.toolCallId}
-                />
-            );
-        }
+    const artifact = resolveToolArtifact({
+        toolName,
+        toolInput: toolPart.input,
+        toolOutput: toolPart.output,
+    });
+    if (artifact) {
         return (
-            <BashCodeDisplay
-                key={toolPart.toolCallId}
-                content={args.command}
+            <ToolArtifactCard
+                artifact={artifact}
+                messageId={messageId}
+                applied={applied}
                 isStream={isStream}
-                defaultStdOut={toolPart.state === 'output-available' ? result?.output ?? null : null}
-                defaultStdErr={toolPart.state === 'output-available' ? result?.error ?? null : null}
             />
         );
     }
@@ -68,106 +61,6 @@ const ToolCallDisplayComponent = ({
                 />
             );
         }
-    }
-
-    if (toolName === WriteFileTool.toolName) {
-        const args = toolPart.input as z.infer<typeof WriteFileTool.parameters> | null;
-        const filePath = args?.file_path;
-        const codeContent = args?.content;
-        const branchId = args?.branchId;
-        if (!filePath || !codeContent) {
-            return (
-                <ToolCallSimple
-                    toolPart={toolPart}
-                    key={toolPart.toolCallId}
-                />
-            );
-        }
-        return (
-            <CollapsibleCodeBlock
-                path={filePath}
-                content={codeContent}
-                messageId={messageId}
-                applied={applied}
-                isStream={isStream}
-                branchId={branchId}
-            />
-        );
-    }
-
-    if (toolName === FuzzyEditFileTool.toolName) {
-        const args = toolPart.input as z.infer<typeof FuzzyEditFileTool.parameters> | null;
-        const filePath = args?.file_path;
-        const codeContent = args?.content;
-        const branchId = args?.branchId;
-        if (!filePath || !codeContent) {
-            return (
-                <ToolCallSimple
-                    toolPart={toolPart}
-                    key={toolPart.toolCallId}
-                />
-            );
-        }
-        return (
-            <CollapsibleCodeBlock
-                path={filePath}
-                content={codeContent}
-                messageId={messageId}
-                applied={applied}
-                isStream={isStream}
-                branchId={branchId}
-            />
-        );
-    }
-
-    if (toolName === SearchReplaceEditTool.toolName) {
-        const args = toolPart.input as z.infer<typeof SearchReplaceEditTool.parameters> | null;
-        const filePath = args?.file_path;
-        const codeContent = args?.new_string;
-        const branchId = args?.branchId;
-        if (!filePath || !codeContent) {
-            return (
-                <ToolCallSimple
-                    toolPart={toolPart}
-                    key={toolPart.toolCallId}
-                />
-            );
-        }
-        return (
-            <CollapsibleCodeBlock
-                path={filePath}
-                content={codeContent}
-                messageId={messageId}
-                applied={applied}
-                isStream={isStream}
-                branchId={branchId}
-            />
-        );
-    }
-
-    if (toolName === SearchReplaceMultiEditFileTool.toolName) {
-        const args = toolPart.input as z.infer<typeof SearchReplaceMultiEditFileTool.parameters> | null;
-        const filePath = args?.file_path;
-        const codeContent = args?.edits?.map((edit) => edit.new_string).join('\n...\n');
-        const branchId = args?.branchId;
-        if (!filePath || !codeContent) {
-            return (
-                <ToolCallSimple
-                    toolPart={toolPart}
-                    key={toolPart.toolCallId}
-                />
-            );
-        }
-        return (
-            <CollapsibleCodeBlock
-                path={filePath}
-                content={codeContent}
-                messageId={messageId}
-                applied={applied}
-                isStream={isStream}
-                branchId={branchId}
-            />
-        );
     }
 
     // if (toolName === TodoWriteTool.toolName) {
@@ -203,21 +96,6 @@ const ToolCallDisplayComponent = ({
     //         </div>
     //     );
     // }
-
-    if (toolName === TypecheckTool.toolName) {
-        const result = toolPart.output as { success: boolean; error?: string } | null;
-        const error = stripAnsi(result?.error || '');
-        return (
-            <BashCodeDisplay
-                key={toolPart.toolCallId}
-                content={'bunx tsc --noEmit'}
-                isStream={isStream}
-                defaultStdOut={(result?.success ? '✅ Typecheck passed!' : result?.error) ?? null}
-                defaultStdErr={error ?? null}
-            />
-        );
-    }
-
 
     return (
         <ToolCallSimple

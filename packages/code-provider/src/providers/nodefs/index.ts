@@ -31,6 +31,7 @@ import {
     type ListProjectsOutput,
     type PauseProjectInput,
     type PauseProjectOutput,
+    type ProviderTerminalSessionType,
     type ProviderTerminalShellSize,
     type ReadFileInput,
     type ReadFileOutput,
@@ -119,6 +120,7 @@ interface NodeFsBridgeTaskDescriptor {
 interface NodeFsBridgeTerminalDescriptor {
     terminalId: string;
     name: string;
+    sessionType: ProviderTerminalSessionType;
 }
 
 interface NodeFsBridgeBackgroundCommandDescriptor {
@@ -144,6 +146,7 @@ export interface NodeFsDesktopProviderBridge {
     terminalOpen(input: { terminalId: string; dimensions?: ProviderTerminalShellSize }): Promise<string>;
     terminalWrite(input: { terminalId: string; value: string; dimensions?: ProviderTerminalShellSize }): Promise<void>;
     terminalRun(input: { terminalId: string; value: string; dimensions?: ProviderTerminalShellSize }): Promise<void>;
+    terminalResize(input: { terminalId: string; dimensions: ProviderTerminalShellSize }): Promise<void>;
     terminalKill(input: { terminalId: string }): Promise<void>;
     onTerminalOutput(terminalId: string, callback: (data: string) => void): () => void;
     getTask(input: NodeFsBridgeTaskInput): Promise<NodeFsBridgeTaskDescriptor>;
@@ -316,7 +319,11 @@ export class NodeFsProvider extends Provider {
     async createTerminal(_input: CreateTerminalInput): Promise<CreateTerminalOutput> {
         const terminal = await getBridge().createTerminal({ sessionId: this.sessionId });
         return {
-            terminal: new NodeFsTerminal(terminal.terminalId, terminal.name),
+            terminal: new NodeFsTerminal(
+                terminal.terminalId,
+                terminal.name,
+                terminal.sessionType,
+            ),
         };
     }
 
@@ -442,8 +449,13 @@ export class NodeFsTerminal extends ProviderTerminal {
     constructor(
         private readonly terminalId: string,
         private readonly terminalName: string,
+        private readonly terminalSessionType: ProviderTerminalSessionType,
     ) {
         super();
+    }
+
+    get sessionType(): ProviderTerminalSessionType {
+        return this.terminalSessionType;
     }
 
     get id(): string {
@@ -474,6 +486,13 @@ export class NodeFsTerminal extends ProviderTerminal {
             terminalId: this.terminalId,
             value: input,
             dimensions,
+        });
+    }
+
+    resize(cols: number, rows: number): Promise<void> {
+        return getBridge().terminalResize({
+            terminalId: this.terminalId,
+            dimensions: { cols, rows },
         });
     }
 

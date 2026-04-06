@@ -48,17 +48,23 @@ export function applyStylesToEditor(editorView: EditorView, styles: Record<strin
     }
 
     const tr = state.tr.addMark(0, state.doc.content.size, styleMark.create({ style: styles }));
-    const fontSize = adaptValueToCanvas(parseFloat(styles.fontSize ?? ''));
-    const lineHeight = adaptValueToCanvas(parseFloat(styles.lineHeight ?? ''));
-    const fontFamily = ensureFontLoaded(styles.fontFamily ?? '');
+    Object.assign(editorView.dom.style, getEditorDomStyles(styles));
+    dispatch(tr);
+}
 
-    Object.assign(editorView.dom.style, {
+export function getEditorDomStyles(styles: Record<string, string>): Record<string, string | undefined> {
+    const fontSize = adaptStyleValue(styles.fontSize);
+    const lineHeight = adaptStyleValue(styles.lineHeight);
+    const fontFamily = ensureFontLoaded(styles.fontFamily ?? '') ?? undefined;
+
+    return {
         fontSize: `${fontSize}px`,
         lineHeight: `${lineHeight}px`,
         fontWeight: styles.fontWeight,
         fontStyle: styles.fontStyle,
         color: isColorEmpty(styles.color ?? '') ? 'inherit' : styles.color,
         textAlign: styles.textAlign,
+        textTransform: styles.textTransform,
         textDecoration: styles.textDecoration,
         letterSpacing: styles.letterSpacing,
         wordSpacing: styles.wordSpacing,
@@ -72,8 +78,21 @@ export function applyStylesToEditor(editorView: EditorView, styles: Record<strin
         height: '100%',
         fontFamily,
         padding: styles.padding,
-    });
-    dispatch(tr);
+        whiteSpace: styles.whiteSpace,
+    };
+}
+
+function adaptStyleValue(value: string | undefined) {
+    const parsedValue = parseFloat(value ?? '');
+    if (Number.isNaN(parsedValue)) {
+        return parsedValue;
+    }
+
+    if (typeof document === 'undefined') {
+        return parsedValue;
+    }
+
+    return adaptValueToCanvas(parsedValue);
 }
 
 const createLineBreakHandler = () => (state: EditorState, dispatch?: (tr: any) => void) => {

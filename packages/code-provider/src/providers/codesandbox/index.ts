@@ -455,6 +455,10 @@ export class CodesandboxTerminal extends ProviderTerminal {
         return this._terminal.id;
     }
 
+    get sessionType() {
+        return 'pty' as const;
+    }
+
     get name(): string {
         return this._terminal.name;
     }

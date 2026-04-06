@@ -1,33 +1,42 @@
 import type { T } from '../packages';
 import { t } from '../packages';
 
+function isEditableTextChild(child: T.JSXElement['children'][number]) {
+    return t.isJSXText(child) ||
+        (t.isJSXExpressionContainer(child) && t.isStringLiteral(child.expression)) ||
+        (t.isJSXElement(child) &&
+            t.isJSXIdentifier(child.openingElement.name) &&
+            child.openingElement.name.name === 'br');
+}
+
+function createSafeJsxTextNode(textContent: string) {
+    return /[<>{}&]/.test(textContent)
+        ? t.jsxExpressionContainer(t.stringLiteral(textContent))
+        : t.jsxText(textContent);
+}
+
 export function updateNodeTextContent(node: T.JSXElement, textContent: string): void {
-    // Split the text content by newlines
     const parts = textContent.split('\n');
 
-    // If there's only one part (no newlines), handle as before
-    if (parts.length === 1) {
-        const textNode = node.children.find((child) => t.isJSXText(child));
-        if (textNode) {
-            textNode.value = textContent;
-        } else {
-            node.children.unshift(t.jsxText(textContent));
-        }
-        return;
-    }
+    node.children = node.children.filter((child) => !isEditableTextChild(child));
 
-    // Clear existing children
-    node.children = [];
-
-    // Add each part with a <br/> in between
+    const nextChildren: T.JSXElement['children'] = [];
     parts.forEach((part, index) => {
-        if (part) {
-            node.children.push(t.jsxText(part));
+        if (part.length > 0 || parts.length === 1) {
+            nextChildren.push(createSafeJsxTextNode(part));
         }
+
         if (index < parts.length - 1) {
-            node.children.push(
-                t.jsxElement(t.jsxOpeningElement(t.jsxIdentifier('br'), [], true), null, [], true),
+            nextChildren.push(
+                t.jsxElement(
+                    t.jsxOpeningElement(t.jsxIdentifier('br'), [], true),
+                    null,
+                    [],
+                    true,
+                ),
             );
         }
     });
+
+    node.children.unshift(...nextChildren);
 }

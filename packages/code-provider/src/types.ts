@@ -253,11 +253,17 @@ export type ProviderTerminalShellSize = {
     rows: number;
 };
 
+export type ProviderTerminalSessionType = 'pty' | 'process';
+
 /**
  * This is a wrapper around the terminal object from the code provider.
  * Inspired from @codesandbox/sdk/sessions/WebSocketSession/terminals.d.ts
  */
 export abstract class ProviderTerminal {
+    get sessionType(): ProviderTerminalSessionType {
+        return 'process';
+    }
+
     /**
      * Gets the ID of the terminal. Can be used to open it again.
      */
@@ -271,6 +277,9 @@ export abstract class ProviderTerminal {
     abstract write(input: string, dimensions?: ProviderTerminalShellSize): Promise<void>;
     abstract run(input: string, dimensions?: ProviderTerminalShellSize): Promise<void>;
     abstract kill(): Promise<void>;
+    resize(_cols: number, _rows: number): Promise<void> {
+        return Promise.resolve();
+    }
 
     // returns a function to unsubscribe from the event
     abstract onOutput(callback: (data: string) => void): () => void;

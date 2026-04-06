@@ -1,12 +1,14 @@
 import { useOptionalDesktopLocalProject } from '@/app/project/[id]/_components/desktop-local-context';
+import { useDesktopBridge } from '@/app/desktop/use-desktop-bridge';
 import { useEditorEngine } from '@/components/store/editor';
 import { api } from '@/trpc/react';
-import { isDesktopLocalProjectId } from '@/utils/desktop-local';
+import { isDesktopLocalProjectId, type DesktopRuntimeBackend } from '@/utils/desktop-local';
 import { DefaultSettings } from '@onlook/constants';
 import { toDbProjectSettings } from '@onlook/db';
 import { Button } from '@onlook/ui/button';
 import { Icons } from '@onlook/ui/icons';
 import { Input } from '@onlook/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@onlook/ui/select';
 import { Separator } from '@onlook/ui/separator';
 import { toast } from '@onlook/ui/sonner';
 import { observer } from 'mobx-react-lite';
@@ -16,6 +18,7 @@ export const ProjectTab = observer(() => {
     const editorEngine = useEditorEngine();
     const desktopLocalProject = useOptionalDesktopLocalProject();
     const isDesktopLocal = isDesktopLocalProjectId(editorEngine.projectId);
+    const { desktop } = useDesktopBridge();
     const utils = api.useUtils();
     const { data: project } = api.project.get.useQuery(
         { projectId: editorEngine.projectId },
@@ -49,6 +52,8 @@ export const ProjectTab = observer(() => {
         build: '',
     });
     const [isSaving, setIsSaving] = useState(false);
+    const [desktopPreferredBackend, setDesktopPreferredBackend] = useState<DesktopRuntimeBackend>('local');
+    const [isSavingDesktopRuntime, setIsSavingDesktopRuntime] = useState(false);
 
     // Initialize and sync form data
     useEffect(() => {
@@ -59,6 +64,21 @@ export const ProjectTab = observer(() => {
             build: buildCommand,
         });
     }, [name, installCommand, runCommand, buildCommand]);
+
+    useEffect(() => {
+        if (!isDesktopLocal || !desktop || !desktopLocalProject) {
+            return;
+        }
+
+        void desktop.getProject(desktopLocalProject.desktopProjectId)
+            .then((project) => {
+                setDesktopPreferredBackend(project?.preferredBackend ?? desktopLocalProject.session.backend);
+            })
+            .catch((error: unknown) => {
+                console.error('Failed to load desktop project runtime preference:', error);
+                setDesktopPreferredBackend(desktopLocalProject.session.backend);
+            });
+    }, [desktop, desktopLocalProject, isDesktopLocal]);
 
     // Check if form has changes
     const isDirty = useMemo(() => {
@@ -130,6 +150,27 @@ export const ProjectTab = observer(() => {
         setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
+    const handleDesktopRuntimeChange = async (preferredBackend: DesktopRuntimeBackend) => {
+        if (!desktop || !desktopLocalProject) {
+            return;
+        }
+
+        setIsSavingDesktopRuntime(true);
+        try {
+            const updatedProject = await desktop.updateProjectRuntime({
+                projectId: desktopLocalProject.desktopProjectId,
+                preferredBackend,
+            });
+            setDesktopPreferredBackend(updatedProject?.preferredBackend ?? preferredBackend);
+            toast.success('Desktop runtime preference updated. Reopen the project to apply it.');
+        } catch (error) {
+            console.error('Failed to update desktop project runtime:', error);
+            toast.error('Failed to update desktop runtime preference.');
+        } finally {
+            setIsSavingDesktopRuntime(false);
+        }
+    };
+
     return (
         <div className="text-sm flex flex-col h-full">
             <div className="flex flex-col gap-4 p-6 pb-24 overflow-y-auto flex-1">
@@ -155,6 +196,46 @@ export const ProjectTab = observer(() => {
                     </div>
                 </div>
                 <Separator />
+
+                {isDesktopLocal && desktopLocalProject && (
+                    <>
+                        <div className="flex flex-col gap-4">
+                            <div className="flex flex-col gap-2">
+                                <h2 className="text-lg">Desktop Runtime</h2>
+                                <p className="text-small text-foreground-secondary">
+                                    Choose which runtime backend new sessions for this desktop
+                                    project should use.
+                                </p>
+                            </div>
+                            <div className="space-y-4">
+                                <div className="flex justify-between items-center gap-4">
+                                    <div>
+                                        <p className="text-muted-foreground">Preferred backend</p>
+                                        <p className="text-small text-foreground-secondary mt-1">
+                                            Current session: {desktopLocalProject.session.backend === 'container' ? 'Container (Docker)' : 'Local'}
+                                        </p>
+                                    </div>
+                                    <Select
+                                        value={desktopPreferredBackend}
+                                        onValueChange={(value) => {
+                                            void handleDesktopRuntimeChange(value as DesktopRuntimeBackend);
+                                        }}
+                                        disabled={isSavingDesktopRuntime}
+                                    >
+                                        <SelectTrigger className="w-52">
+                                            <SelectValue placeholder="Select backend" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="local">Local (default)</SelectItem>
+                                            <SelectItem value="container">Container (Docker)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                        <Separator />
+                    </>
+                )}
 
                 <div className="flex flex-col gap-4">
                     <div className="flex flex-col gap-2">

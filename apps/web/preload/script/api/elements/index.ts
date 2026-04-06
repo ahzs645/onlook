@@ -2,6 +2,7 @@ import { EditorAttributes } from '@onlook/constants';
 import type { DomElement } from '@onlook/models';
 import { getHtmlElement } from '../../helpers';
 import { getDomElement } from './helpers';
+import { findNearestAnnotatedElement } from './selection';
 
 export const getElementByDomId = (domId: string, getStyle: boolean): DomElement => {
     const el = getHtmlElement(domId) || document.body;
@@ -9,7 +10,7 @@ export const getElementByDomId = (domId: string, getStyle: boolean): DomElement 
 };
 
 export const getElementAtLoc = (x: number, y: number, getStyle: boolean): DomElement => {
-    const el = getDeepElement(x, y) || document.body;
+    const el = findNearestAnnotatedElement(getDeepElement(x, y)) || document.body;
     return getDomElement(el as HTMLElement, getStyle);
 };
 
