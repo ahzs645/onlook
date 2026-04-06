@@ -14,7 +14,6 @@ export interface ProcessDomResult {
 function processDomDebounced(root: HTMLElement = document.body): ProcessDomResult | null {
     const frameId = getFrameId();
     if (!frameId) {
-        console.warn('frameView id not found, skipping dom processing');
         return null;
     }
     const layerMap = buildLayerTree(root);

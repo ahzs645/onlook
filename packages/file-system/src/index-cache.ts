@@ -10,6 +10,17 @@ const staticMemoryMap = new Map<string, Record<string, JsxElementMetadata>>();
 // guard against multiple loads race condition
 const loadingPromises = new Map<string, Promise<Record<string, JsxElementMetadata>>>();
 
+function isMissingIndexFileError(error: unknown) {
+    const message =
+        error instanceof Error
+            ? error.message
+            : typeof error === 'string'
+              ? error
+              : `${error ?? ''}`;
+
+    return message.includes('ENOENT') || message.includes('No such file or directory');
+}
+
 export async function getOrLoadIndex(
     cacheKey: string,
     indexPath: string,
@@ -41,7 +52,9 @@ export async function getOrLoadIndex(
             staticMemoryMap.set(cacheKey, index);
             return index;
         } catch (error) {
-            console.warn(`[CodeEditorApi] Failed to load index from ${indexPath}, error: ${error}`);
+            if (!isMissingIndexFileError(error)) {
+                console.warn(`[CodeEditorApi] Failed to load index from ${indexPath}, error: ${error}`);
+            }
 
             // Only set empty if no value was written while we were loading
             const existing = staticMemoryMap.get(cacheKey);

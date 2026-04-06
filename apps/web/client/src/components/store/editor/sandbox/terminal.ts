@@ -9,6 +9,10 @@ import type { ErrorManager } from '../error';
 let FitAddonClass: typeof FitAddon | null = null;
 let TerminalClass: typeof Terminal | null = null;
 
+function isMissingTerminalSessionError(error: unknown) {
+    return error instanceof Error && error.message.includes('Terminal session not found');
+}
+
 export enum CLISessionType {
     TERMINAL = 'terminal',
     TASK = 'task',
@@ -99,7 +103,12 @@ export class CLISessionImpl implements CLISession {
             this.xterm.onResize(({ cols, rows }: { cols: number; rows: number }) => {
                 // Check if terminal has resize method
                 if ('resize' in terminal && typeof terminal.resize === 'function') {
-                    terminal.resize(cols, rows);
+                    void terminal.resize(cols, rows).catch((error) => {
+                        if (isMissingTerminalSessionError(error)) {
+                            return;
+                        }
+                        console.error('Failed to resize terminal:', error);
+                    });
                 }
             });
 
@@ -107,7 +116,12 @@ export class CLISessionImpl implements CLISession {
 
             // Set initial terminal size and environment
             if (this.xterm.cols && this.xterm.rows && 'resize' in terminal && typeof terminal.resize === 'function') {
-                terminal.resize(this.xterm.cols, this.xterm.rows);
+                void terminal.resize(this.xterm.cols, this.xterm.rows).catch((error) => {
+                    if (isMissingTerminalSessionError(error)) {
+                        return;
+                    }
+                    console.error('Failed to resize terminal:', error);
+                });
             }
 
         } catch (error) {

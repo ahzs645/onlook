@@ -1,5 +1,6 @@
 import { dialog, ipcMain, shell } from 'electron';
 import { desktopIpcChannels, getProviderWatchChannel } from './channels';
+import { DesktopRuntimeError } from '../errors';
 import { NODE_FS_SANDBOX_PREFIX } from '../types';
 import type { DesktopStorage } from '../storage';
 import type { RuntimeRegistry } from '../runtime/registry';
@@ -25,6 +26,10 @@ interface DesktopIpcContext {
 
 function getRuntimeByInputSession(runtimeRegistry: RuntimeRegistry, input: { sessionId: string }) {
     return runtimeRegistry.getRuntimeBySandboxId(`${NODE_FS_SANDBOX_PREFIX}${input.sessionId}`);
+}
+
+function isTerminalExpiredError(error: unknown) {
+    return error instanceof DesktopRuntimeError && error.code === 'DESKTOP_TERMINAL_EXPIRED';
 }
 
 export function registerDesktopIpcHandlers(context: DesktopIpcContext) {
@@ -299,10 +304,17 @@ export function registerDesktopIpcHandlers(context: DesktopIpcContext) {
             return;
         }
 
-        await context.runtimeRegistry
-            .getRuntimeByTerminalId(input.terminalId)
-            .getTerminal(input.terminalId)
-            .resize(input.dimensions.cols, input.dimensions.rows);
+        try {
+            await context.runtimeRegistry
+                .getRuntimeByTerminalId(input.terminalId)
+                .getTerminal(input.terminalId)
+                .resize(input.dimensions.cols, input.dimensions.rows);
+        } catch (error) {
+            if (isTerminalExpiredError(error)) {
+                return;
+            }
+            throw error;
+        }
     });
 
     ipcMain.handle(desktopIpcChannels.provider.terminalKill, async (_event, input) => {

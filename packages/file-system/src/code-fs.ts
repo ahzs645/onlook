@@ -28,19 +28,44 @@ export interface CodeEditorOptions {
     routerType?: RouterType;
 }
 
+const activeIndexCacheInstances = new Map<string, number>();
+const indexWriteQueues = new Map<string, Promise<void>>();
+
+function retainIndexCache(cacheKey: string) {
+    activeIndexCacheInstances.set(cacheKey, (activeIndexCacheInstances.get(cacheKey) ?? 0) + 1);
+}
+
+function releaseIndexCache(cacheKey: string) {
+    const nextCount = (activeIndexCacheInstances.get(cacheKey) ?? 1) - 1;
+    if (nextCount > 0) {
+        activeIndexCacheInstances.set(cacheKey, nextCount);
+        return nextCount;
+    }
+
+    activeIndexCacheInstances.delete(cacheKey);
+    return 0;
+}
+
 export class CodeFileSystem extends FileSystem {
     private projectId: string;
     private branchId: string;
+    private cacheKey: string;
     private options: Required<CodeEditorOptions>;
     private indexPath = `${ONLOOK_CACHE_DIRECTORY}/index.json`;
+    private readonly debouncedSaveIndexToFile: ReturnType<typeof debounce>;
 
     constructor(projectId: string, branchId: string, options: CodeEditorOptions = {}) {
         super(`/${projectId}/${branchId}`);
         this.projectId = projectId;
         this.branchId = branchId;
+        this.cacheKey = `${this.projectId}/${this.branchId}`;
         this.options = {
             routerType: options.routerType ?? RouterType.APP,
         };
+        retainIndexCache(this.cacheKey);
+        this.debouncedSaveIndexToFile = debounce(() => {
+            void this.enqueueIndexPersist();
+        }, 1000);
     }
 
     async writeFile(path: string, content: string | Uint8Array): Promise<void> {
@@ -239,24 +264,43 @@ export class CodeFileSystem extends FileSystem {
     }
 
     private async loadIndex(): Promise<Record<string, JsxElementMetadata>> {
-        return getOrLoadIndex(this.getCacheKey(), this.indexPath, (path) => this.readFile(path));
+        return getOrLoadIndex(this.cacheKey, this.indexPath, (path) => this.readFile(path));
     }
 
     private async saveIndex(index: Record<string, JsxElementMetadata>): Promise<void> {
-        saveIndexToCache(this.getCacheKey(), index);
+        saveIndexToCache(this.cacheKey, index);
         void this.debouncedSaveIndexToFile();
     }
 
-    private async undobounceSaveIndexToFile(): Promise<void> {
+    private async enqueueIndexPersist(): Promise<void> {
+        const pendingWrite = indexWriteQueues.get(this.cacheKey) ?? Promise.resolve();
+        const nextWrite = pendingWrite
+            .catch(() => undefined)
+            .then(async () => {
+                await this.persistIndexToFile();
+            });
+
+        indexWriteQueues.set(this.cacheKey, nextWrite);
+
+        try {
+            await nextWrite;
+        } finally {
+            if (indexWriteQueues.get(this.cacheKey) === nextWrite) {
+                indexWriteQueues.delete(this.cacheKey);
+            }
+        }
+    }
+
+    private async persistIndexToFile(): Promise<void> {
         try {
             await this.createDirectory(ONLOOK_CACHE_DIRECTORY);
         } catch {
             return;
         }
 
-        const index = getIndexFromCache(this.getCacheKey());
+        const index = getIndexFromCache(this.cacheKey);
         if (index) {
-            const tempIndexPath = `${this.indexPath}.tmp`;
+            const tempIndexPath = `${this.indexPath}.tmp-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
             try {
                 await super.writeFile(tempIndexPath, JSON.stringify(index));
                 if (await this.fileExists(this.indexPath)) {
@@ -271,8 +315,6 @@ export class CodeFileSystem extends FileSystem {
             }
         }
     }
-
-    private debouncedSaveIndexToFile = debounce(this.undobounceSaveIndexToFile, 1000);
 
     private isJsxFile(path: string): boolean {
         // Exclude the onlook preload script from JSX processing
@@ -298,15 +340,12 @@ export class CodeFileSystem extends FileSystem {
 
     async cleanup(): Promise<void> {
         this.debouncedSaveIndexToFile.cancel();
-        const cacheKey = this.getCacheKey();
-        if (getIndexFromCache(cacheKey)) {
-            await this.undobounceSaveIndexToFile();
+        if (getIndexFromCache(this.cacheKey)) {
+            await this.enqueueIndexPersist();
         }
 
-        clearIndexCache(cacheKey);
-    }
-
-    private getCacheKey(): string {
-        return `${this.projectId}/${this.branchId}`;
+        if (releaseIndexCache(this.cacheKey) === 0) {
+            clearIndexCache(this.cacheKey);
+        }
     }
 }
